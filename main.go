@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"gopkg.in/alecthomas/kingpin.v2"
 	image "nsteg/image"
 	"os"
@@ -22,9 +23,13 @@ func main() {
 		encodedMediaFile = decode.Arg("encoded-media-file", "Media file containing encoded data").Required().String()
 	)
 
+	var err error
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case "encode":
-		image.EncodeImg(*srcMediaFile, *outputFile, strings.Split(*filesToHide, ","), byte(*LSBsToUse))
+		err = image.Encode(*srcMediaFile, *outputFile, strings.Split(*filesToHide, ","), image.Config{LSBsToUse: byte(*LSBsToUse)})
+		if err != nil {
+			fmt.Printf("Error during image encode: %v", err)
+		}
 	case "decode":
 		image.DecodeImg(*encodedMediaFile)
 	}

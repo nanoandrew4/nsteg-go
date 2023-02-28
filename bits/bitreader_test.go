@@ -1,4 +1,4 @@
-package stegimg
+package bits
 
 import (
 	"crypto/rand"
@@ -6,22 +6,38 @@ import (
 	"testing"
 )
 
-func BenchmarkReadBits(b *testing.B) {
-	for LSBsToUse := uint(1); LSBsToUse <= 8; LSBsToUse++ {
-		initBitsFromByteMap(byte(LSBsToUse))
-		bytesForBenchmark := make([]byte, 1000000000)
-		_, err := rand.Read(bytesForBenchmark)
-		if err != nil {
-			panic(err)
-		}
-		bBitReader := newBitReader(bytesForBenchmark)
+const numOfBytesForBenchmark = 1000000
 
+func BenchmarkReadBits(b *testing.B) {
+	var bBitReader *BitReader
+	for LSBsToUse := uint(1); LSBsToUse <= 8; LSBsToUse++ {
 		b.Run(fmt.Sprintf("LSBsToUse=%d", LSBsToUse), func(b *testing.B) {
-			for i := 0; len(bBitReader.bytes) > 0 && i < b.N; i++ {
-				bBitReader.readBits(LSBsToUse)
+			var bytesRead int
+			for i := 0; i < b.N; {
+				b.StopTimer()
+				bBitReader = initBenchmarkBitReader()
+				b.StartTimer()
+				for ; i < b.N && len(bBitReader.bytes) > 0; i++ {
+					bBitReader.ReadBits(LSBsToUse)
+				}
+				b.StopTimer()
+				if len(bBitReader.bytes) == 0 {
+					bytesRead += numOfBytesForBenchmark
+				}
 			}
+			bytesRead += numOfBytesForBenchmark - len(bBitReader.bytes)
+			b.SetBytes(int64(bytesRead))
 		})
 	}
+}
+
+func initBenchmarkBitReader() *BitReader {
+	bytesForBenchmark := make([]byte, numOfBytesForBenchmark)
+	_, err := rand.Read(bytesForBenchmark)
+	if err != nil {
+		panic(err)
+	}
+	return NewBitReader(bytesForBenchmark)
 }
 
 func TestReadBits(t *testing.T) {
@@ -40,10 +56,9 @@ func TestReadBits(t *testing.T) {
 	}
 
 	for bitsToRead := uint(1); bitsToRead <= 8; bitsToRead++ {
-		initBitsFromByteMap(byte(bitsToRead))
-		tBitReader := newBitReader(bytesToTestWith)
+		tBitReader := NewBitReader(bytesToTestWith)
 		for iter, expectedBits := range expectedBitsToRead[bitsToRead-1] {
-			bits := tBitReader.readBits(bitsToRead)
+			bits := tBitReader.ReadBits(bitsToRead)
 			if bits != expectedBits {
 				t.Errorf("Failure testing bit reader with %d bits per read on iter %d, result was: %d, expected %d", bitsToRead, iter+1, bits, expectedBits)
 			}

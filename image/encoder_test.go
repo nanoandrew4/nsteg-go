@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"nsteg/bits"
 	"os"
 	"strings"
 	"testing"
@@ -21,13 +22,11 @@ const (
 func TestEncode(t *testing.T) {
 	chdirToTestFileDir(encTestFolder)
 
-	chunkSizeMultiplier = 1
-
 	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
 		generateImageFile(encTestImage, 100, 100)
 
 		testFiles := generateTestFiles(3, 1024)
-		EncodeImg(encTestImage, encTestOutImage, testFiles, LSBsToUse)
+		Encode(encTestImage, encTestOutImage, testFiles, Config{LSBsToUse: LSBsToUse})
 
 		outputImage, err := getImageFromFilePath(encTestOutImage)
 		if err != nil {
@@ -64,15 +63,15 @@ func TestEncode(t *testing.T) {
 			expectedEncodedBytes = append(expectedEncodedBytes, fileBytes...)
 		}
 
-		testBitReader := newBitReader(expectedEncodedBytes)
-		for currentPixel := 1; len(testBitReader.bytes) > 0; currentPixel++ {
+		testBitReader := bits.NewBitReader(expectedEncodedBytes)
+		for currentPixel := 1; testBitReader.BytesLeftToRead() > 0; currentPixel++ {
 			px := currentPixel % outputImage.Bounds().Dx()
 			py := currentPixel / outputImage.Bounds().Dx()
 			pixelOffset := outputImage.PixOffset(px, py)
 			pixel := outputImage.Pix[pixelOffset : pixelOffset+4]
 			for channelIdx := byte(0); channelIdx < channelsToWrite; channelIdx++ {
 				bitsToCheck := pixel[channelIdx] & (1<<LSBsToUse - 1)
-				expectedBits := testBitReader.readBits(uint(LSBsToUse))
+				expectedBits := testBitReader.ReadBits(uint(LSBsToUse))
 				if bitsToCheck != expectedBits {
 					t.Fatalf("Error with LSBs %d in pixel|channel %d|%d, expected|got %d|%d", LSBsToUse, currentPixel+1, channelIdx+1, expectedBits, bitsToCheck)
 				}
@@ -91,7 +90,6 @@ func BenchmarkEncodeSpeed(b *testing.B) {
 
 	img := generateImage(10000, 10000)
 	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
-		initBitsFromByteMap(LSBsToUse)
 		for _, byteSize := range []int{100000, 1000000, 10000000} {
 			numOfBytesToEncode := byteSize
 			b.Run(fmt.Sprintf("MBs=%f/LSBsToUse=%d", float64(byteSize)/1000000.0, LSBsToUse), func(b *testing.B) {
@@ -103,7 +101,7 @@ func BenchmarkEncodeSpeed(b *testing.B) {
 					if err != nil {
 						panic(err)
 					}
-					testImageEncoder := newImageEncoder(img, LSBsToUse)
+					testImageEncoder := newEncoder(img, LSBsToUse)
 					bytesReader := bytes.NewReader(bytesToEncode)
 					b.StartTimer()
 					testImageEncoder.encodeDataToImage(bytesReader)
