@@ -1,15 +1,14 @@
 package stegimg
 
 import (
-	"fmt"
 	"image"
 	"os"
 )
 
-func DecodeImg(encodedMediaFile string) {
+func DecodeImg(encodedMediaFile string) error {
 	srcImage, err := getImageFromFilePath(encodedMediaFile)
 	if err != nil {
-		fmt.Fprint(os.Stderr, "An error ocurred when opening image '", encodedMediaFile, "':", err)
+		return err
 	}
 
 	decoder := newImageDecoder(srcImage)
@@ -23,9 +22,10 @@ func DecodeImg(encodedMediaFile string) {
 		fileBytes := decoder.readBytes(fileLength)
 		err = os.WriteFile(fileName, fileBytes, 0664)
 		if err != nil {
-			// handle error
+			return err
 		}
 	}
+	return nil
 }
 
 type imageDecoder struct {
@@ -49,9 +49,16 @@ func (d *imageDecoder) incrementCurrentPixel() {
 }
 
 func (d *imageDecoder) decodeLSBsToUse() {
-	firstPixel := d.image.Pix[:3]
+	for p := 3; p < len(d.image.Pix); p += 4 {
+		if d.image.Pix[p] == 255 {
+			d.currentPixel = p - 3
+			break
+		}
+	}
+	firstPixel := d.image.Pix[d.currentPixel : d.currentPixel+3]
+	// Value will be 0-7 (3 bit value), we add 1 to restore the original 1-8 value
 	d.LSBsToUse = (firstPixel[0] & 1) + (firstPixel[1]&1)<<1 + (firstPixel[2]&1)<<2 + 1
-	d.currentPixel = 4
+	d.currentPixel += 4
 }
 
 func (d *imageDecoder) readBytes(numOfBytesToRead int) []byte {
@@ -59,6 +66,12 @@ func (d *imageDecoder) readBytes(numOfBytesToRead int) []byte {
 	var currByte, currBit byte
 	var currByteIdx int
 	for currByteIdx < numOfBytesToRead {
+		var currentPixelAlpha = d.image.Pix[(d.currentPixel/4)*4+3]
+		if currentPixelAlpha != 255 {
+			d.currentPixel += 4
+			continue
+		}
+
 		if d.currentPixelBit > 0 {
 			bitsLeftToReadInPixel := d.LSBsToUse - d.currentPixelBit
 			currByte += (d.image.Pix[d.currentPixel] & ((1<<bitsLeftToReadInPixel - 1) << (d.currentPixelBit))) >> d.currentPixelBit

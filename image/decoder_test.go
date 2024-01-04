@@ -1,15 +1,12 @@
 package stegimg
 
 import (
+	"crypto/rand"
 	"fmt"
-	"math/rand"
 	"testing"
-	"time"
 )
 
 func BenchmarkDecodeSpeed(b *testing.B) {
-	rand.Seed(time.Now().UnixNano())
-
 	img := generateImage(10000, 10000)
 	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
 		for _, bytesToRead := range []int{100000, 1000000, 10000000} {

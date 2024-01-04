@@ -8,7 +8,6 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
-	"log"
 	"nsteg/bits"
 	"os"
 	"strings"
@@ -26,6 +25,7 @@ var (
 func init() {
 	image.RegisterFormat("jpeg", "jpeg", jpeg.Decode, jpeg.DecodeConfig)
 	image.RegisterFormat("jpg", "jpg", jpeg.Decode, jpeg.DecodeConfig)
+	image.RegisterFormat("png", "png", png.Decode, png.DecodeConfig)
 }
 
 func Encode(imageSourcePath, outputPath string, filesToHide []string, config Config) error {
@@ -43,17 +43,7 @@ func Encode(imageSourcePath, outputPath string, filesToHide []string, config Con
 	}
 	encoder.encodeDataToImage(filesToHideReader)
 
-	f, err := os.Create(outputPath)
-	if err != nil {
-		return err
-	}
-
-	enc := png.Encoder{CompressionLevel: config.PngCompressionLevel}
-	err = enc.Encode(f, encoder.image)
-	if err != nil {
-		return err
-	}
-	return f.Close()
+	return encoder.saveAsPng(outputPath, config)
 }
 
 type imageEncoder struct {
@@ -77,13 +67,20 @@ func newEncoder(image *image.RGBA, LSBsToUse byte) *imageEncoder {
 }
 
 func (ie *imageEncoder) encodeLSBsToImage() {
-	packedLSBsToUse := ie.lsbsToUse - 1
+	packedLSBsToUse := ie.lsbsToUse - 1 // Save LSBs to use as value 0-7 so it fits in 3 bits (one pixel)
 	LSBsBitReader := bits.NewBitReader([]byte{packedLSBsToUse})
 
 	LSBsToUse := ie.lsbsToUse
+	for p := 3; p < len(ie.image.Pix); p += 4 {
+		if ie.image.Pix[p] == 255 {
+			ie.currentPixel = p / 4
+			break
+		}
+	}
+
 	ie.fillPixelLSBs(ie.currentPixel, LSBsBitReader, 1)
 	ie.lsbsToUse = LSBsToUse
-	ie.currentPixel = 1
+	ie.currentPixel++
 }
 
 func (ie *imageEncoder) withChunkSizeMultiplier(chunkSizeMultiplier int) *imageEncoder {
@@ -93,6 +90,18 @@ func (ie *imageEncoder) withChunkSizeMultiplier(chunkSizeMultiplier int) *imageE
 
 func (ie *imageEncoder) setupDataReader(filesToHide []string) (io.Reader, error) {
 	var dataReaders []io.Reader
+
+	// Scan ahead to count opaque pixels
+	availablePixelChan := make(chan uint64)
+	go func() {
+		var availablePixels uint64
+		for p := 3; p < len(ie.image.Pix); p += 4 {
+			if ie.image.Pix[p] == 255 {
+				availablePixels++
+			}
+		}
+		availablePixelChan <- availablePixels
+	}()
 
 	dataReaders = append(dataReaders, bytes.NewReader(intToBitArray(len(filesToHide))))
 
@@ -116,10 +125,7 @@ func (ie *imageEncoder) setupDataReader(filesToHide []string) (io.Reader, error)
 		requiredBitsForEncoding += (8 + int64(len([]byte(fileName))) + 8 + fileStat.Size()) * 8
 	}
 
-	imageBounds := ie.image.Bounds()
-	bitsAvailableForEncoding := uint64(imageBounds.Dx()) * uint64(imageBounds.Dy()) * uint64(ie.lsbsToUse*3)
-	if uint64(requiredBitsForEncoding) > bitsAvailableForEncoding {
-		log.Fatalf("Image is not large enough - required capacity is %d bytes, but image only has %d with current LSB settings\n", requiredBitsForEncoding/8, bitsAvailableForEncoding/8)
+	if uint64(requiredBitsForEncoding) > <-availablePixelChan*uint64(channelsToWrite) {
 		return nil, ErrImageNotBigEnough
 	}
 
@@ -137,23 +143,27 @@ func (ie *imageEncoder) encodeDataToImage(dataReader io.Reader) {
 		bytesRead, eofErr = io.ReadFull(dataReader, chunkBytes)
 		chunkBytes = chunkBytes[:bytesRead]
 
-		wg.Add(1)
-		go func(currentPixel int, bytesToWrite []byte) {
-			defer wg.Done()
-			br := bits.NewBitReader(chunkBytes)
-			for ; br.BytesLeftToRead() > 0; currentPixel++ {
-				ie.fillPixelLSBs(currentPixel, br, ie.lsbsToUse)
-			}
-		}(ie.currentPixel, chunkBytes)
+		//wg.Add(1)
+		//go func(currentPixel int, bytesToWrite []byte) {
+		//	defer wg.Done()
+		br := bits.NewBitReader(chunkBytes)
+		for ; br.BytesLeftToRead() > 0; ie.currentPixel++ {
+			ie.fillPixelLSBs(ie.currentPixel, br, ie.lsbsToUse)
+		}
+		//}(ie.currentPixel, chunkBytes)
 
 		ie.currentByte += chunkSize
-		ie.currentPixel += (chunkSize / 3 * 8) / int(ie.lsbsToUse)
+		//ie.currentPixel += (chunkSize / int(channelsToWrite) * 8) / int(ie.lsbsToUse)
 	}
 	wg.Wait()
 }
 
-func (ie *imageEncoder) fillPixelLSBs(pixelToWrite int, br *bits.BitReader, LSBsToUse byte) {
-	pixelChannelsToOverwrite := ie.image.Pix[pixelToWrite*4 : pixelToWrite*4+4]
+func (ie *imageEncoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LSBsToUse byte) {
+	pixelChannelsToOverwrite := ie.image.Pix[pixelToWriteTo*4 : pixelToWriteTo*4+4]
+	// Skip non-opaque pixels, since data encoded in them cannot be fully recovered reliably
+	if pixelChannelsToOverwrite[3] != 255 {
+		return
+	}
 
 	// Clear least significant bits to use, and then add the new bits. Iterate backwards since encoding order is green, blue, red, but we need
 	// the decoded order to be red, blue, green
@@ -162,8 +172,22 @@ func (ie *imageEncoder) fillPixelLSBs(pixelToWrite int, br *bits.BitReader, LSBs
 	}
 }
 
+func (ie *imageEncoder) saveAsPng(outputPath string, config Config) error {
+	f, err := os.Create(outputPath)
+	if err != nil {
+		return err
+	}
+
+	enc := png.Encoder{CompressionLevel: config.PngCompressionLevel}
+	err = enc.Encode(f, ie.image)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
 func intToBitArray(i int) []byte {
-	byteArr := make([]byte, 8, 8)
+	byteArr := make([]byte, 8)
 	for b := uint(0); b < 8; b++ {
 		byteArr[b] = byte((i << (b * 8)) >> 56)
 	}

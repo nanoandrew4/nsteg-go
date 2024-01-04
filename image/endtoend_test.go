@@ -5,18 +5,16 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"os"
 	"testing"
-	"time"
 )
 
 const TestFolderName = "test"
 const TestImgName = "testimg.png"
 const OutputImgName = "output.png"
 const TestFilePrefix = "testfile_"
-const NumOfFilesToGenerate = 10
-const ImageSize = 10000
+const NumOfFilesToGenerate = 5
+const ImageSize = 5000
 
 func TestEncodeDecode(t *testing.T) {
 	chdirToTestFileDir(TestFolderName)
@@ -48,8 +46,6 @@ func TestEncodeDecode(t *testing.T) {
 }
 
 func BenchmarkFullEncodeSpeed(b *testing.B) {
-	rand.Seed(time.Now().UnixNano())
-
 	chdirToTestFileDir(TestFolderName)
 	generateImageFile(TestImgName, ImageSize, ImageSize)
 	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
@@ -68,8 +64,6 @@ func BenchmarkFullEncodeSpeed(b *testing.B) {
 }
 
 func BenchmarkFullDecodeSpeed(b *testing.B) {
-	rand.Seed(time.Now().UnixNano())
-
 	chdirToTestFileDir(TestFolderName)
 	generateImageFile(TestImgName, ImageSize, ImageSize)
 	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {

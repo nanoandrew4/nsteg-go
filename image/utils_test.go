@@ -24,7 +24,7 @@ func generateImageFile(name string, width, height int) {
 	img := image.NewRGBA(image.Rectangle{Min: image.Point{}, Max: image.Point{X: width, Y: height}})
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
-			img.Set(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+			img.Set(x, y, color.RGBA{R: randUint8(), G: randUint8(), B: randUint8(), A: 255})
 		}
 	}
 	imgFile, _ := os.Create(name)
@@ -32,6 +32,10 @@ func generateImageFile(name string, width, height int) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func randUint8() uint8 {
+	return uint8(rand.Intn(256))
 }
 
 func generateTestFiles(numOfFilesToGenerate, fileSize int) []string {
