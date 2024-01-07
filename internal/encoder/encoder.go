@@ -1,16 +1,15 @@
-package stegimg
+package encoder
 
 import (
 	"bytes"
 	"errors"
 	"image"
-	"image/draw"
 	"image/jpeg"
 	"image/png"
 	"io"
-	"nsteg/bits"
+	"nsteg/internal"
+	"nsteg/internal/bits"
 	"os"
-	"strings"
 	"sync"
 )
 
@@ -28,45 +27,47 @@ func init() {
 	image.RegisterFormat("png", "png", png.Decode, png.DecodeConfig)
 }
 
-func Encode(imageSourcePath, outputPath string, filesToHide []string, config Config) error {
-	config.populateUnsetConfigVars()
-
-	srcImage, err := getImageFromFilePath(imageSourcePath)
-	if err != nil {
-		return err
-	}
-
-	encoder := newEncoder(srcImage, config.LSBsToUse)
-	filesToHideReader, err := encoder.setupDataReader(filesToHide)
-	if err != nil {
-		return err
-	}
-	encoder.encodeDataToImage(filesToHideReader)
-
-	return encoder.saveAsPng(outputPath, config)
-}
-
-type imageEncoder struct {
+type ImageEncoder struct {
 	lsbsToUse                         byte
 	minChunkSize, chunkSizeMultiplier int
 	currentByte, currentPixel         int
 
-	image *image.RGBA
+	image  *image.RGBA
+	config internal.ImageEncodeConfig
 }
 
-func newEncoder(image *image.RGBA, LSBsToUse byte) *imageEncoder {
-	enc := &imageEncoder{
+func NewImageEncoder(image *image.RGBA, config internal.ImageEncodeConfig) *ImageEncoder {
+	config.PopulateUnsetConfigVars()
+
+	enc := &ImageEncoder{
 		image:               image,
-		lsbsToUse:           LSBsToUse,
-		minChunkSize:        int(LSBsToUse) * int(channelsToWrite),
-		chunkSizeMultiplier: defaultChunkSizeMultiplier,
+		config:              config,
+		lsbsToUse:           config.LSBsToUse,
+		minChunkSize:        int(config.LSBsToUse) * int(channelsToWrite),
+		chunkSizeMultiplier: internal.DefaultChunkSizeMultiplier,
 	}
 
 	enc.encodeLSBsToImage()
 	return enc
 }
 
-func (ie *imageEncoder) encodeLSBsToImage() {
+func (ie *ImageEncoder) Encode(dataReader io.Reader, output io.Writer) error {
+	ie.encodeDataToRawImage(dataReader)
+
+	return ie.encodeRawImage(output)
+}
+
+func (ie *ImageEncoder) EncodeFiles(files []internal.FileToHide, output io.Writer) error {
+	dataToEncode, err := ie.setupDataReader(files)
+	if err != nil {
+		return err
+	}
+
+	ie.encodeDataToRawImage(dataToEncode)
+	return ie.encodeRawImage(output)
+}
+
+func (ie *ImageEncoder) encodeLSBsToImage() {
 	packedLSBsToUse := ie.lsbsToUse - 1 // Save LSBs to use as value 0-7 so it fits in 3 bits (one pixel)
 	LSBsBitReader := bits.NewBitReader([]byte{packedLSBsToUse})
 
@@ -83,12 +84,7 @@ func (ie *imageEncoder) encodeLSBsToImage() {
 	ie.currentPixel++
 }
 
-func (ie *imageEncoder) withChunkSizeMultiplier(chunkSizeMultiplier int) *imageEncoder {
-	ie.chunkSizeMultiplier = chunkSizeMultiplier
-	return ie
-}
-
-func (ie *imageEncoder) setupDataReader(filesToHide []string) (io.Reader, error) {
+func (ie *ImageEncoder) setupDataReader(filesToHide []internal.FileToHide) (io.Reader, error) {
 	var dataReaders []io.Reader
 
 	// Scan ahead to count opaque pixels
@@ -106,23 +102,13 @@ func (ie *imageEncoder) setupDataReader(filesToHide []string) (io.Reader, error)
 	dataReaders = append(dataReaders, bytes.NewReader(intToBitArray(len(filesToHide))))
 
 	var requiredBitsForEncoding int64
-	for f := 0; f < len(filesToHide); f++ {
-		filePathSplit := strings.Split(filesToHide[f], "/")
-		fileName := filePathSplit[len(filePathSplit)-1]
-		dataReaders = append(dataReaders, bytes.NewReader(intToBitArray(len(fileName))))
-		dataReaders = append(dataReaders, bytes.NewReader([]byte(fileName)))
-
-		file, err := os.Open(filesToHide[f])
-		if err != nil {
-			return nil, err
-		}
-		fileStat, err := file.Stat()
-		if err != nil {
-			return nil, err
-		}
-		dataReaders = append(dataReaders, bytes.NewReader(intToBitArray(int(fileStat.Size()))))
-		dataReaders = append(dataReaders, file)
-		requiredBitsForEncoding += (8 + int64(len([]byte(fileName))) + 8 + fileStat.Size()) * 8
+	for _, fileToHide := range filesToHide {
+		dataReaders = append(dataReaders,
+			bytes.NewReader(intToBitArray(len(fileToHide.Name))),
+			bytes.NewReader([]byte(fileToHide.Name)),
+			bytes.NewReader(intToBitArray(int(fileToHide.Size))),
+			fileToHide.Content)
+		requiredBitsForEncoding += (8 + int64(len([]byte(fileToHide.Name))) + 8 + fileToHide.Size) * 8
 	}
 
 	if uint64(requiredBitsForEncoding) > <-availablePixelChan*uint64(channelsToWrite) {
@@ -132,7 +118,7 @@ func (ie *imageEncoder) setupDataReader(filesToHide []string) (io.Reader, error)
 	return io.MultiReader(dataReaders...), nil
 }
 
-func (ie *imageEncoder) encodeDataToImage(dataReader io.Reader) {
+func (ie *ImageEncoder) encodeDataToRawImage(dataReader io.Reader) {
 	chunkSize := ie.minChunkSize * ie.chunkSizeMultiplier
 
 	bytesRead := chunkSize
@@ -158,7 +144,7 @@ func (ie *imageEncoder) encodeDataToImage(dataReader io.Reader) {
 	wg.Wait()
 }
 
-func (ie *imageEncoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LSBsToUse byte) {
+func (ie *ImageEncoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LSBsToUse byte) {
 	pixelChannelsToOverwrite := ie.image.Pix[pixelToWriteTo*4 : pixelToWriteTo*4+4]
 	// Skip non-opaque pixels, since data encoded in them cannot be fully recovered reliably
 	if pixelChannelsToOverwrite[3] != 255 {
@@ -172,7 +158,12 @@ func (ie *imageEncoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LS
 	}
 }
 
-func (ie *imageEncoder) saveAsPng(outputPath string, config Config) error {
+func (ie *ImageEncoder) encodeRawImage(outputWriter io.Writer) error {
+	enc := png.Encoder{CompressionLevel: ie.config.PngCompressionLevel}
+	return enc.Encode(outputWriter, ie.image)
+}
+
+func (ie *ImageEncoder) saveAsPng(outputPath string, config internal.ImageEncodeConfig) error {
 	f, err := os.Create(outputPath)
 	if err != nil {
 		return err
@@ -193,23 +184,4 @@ func intToBitArray(i int) []byte {
 	}
 
 	return byteArr
-}
-
-func getImageFromFilePath(filePath string) (*image.RGBA, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	srcImage, _, err := image.Decode(f)
-	if err != nil {
-		return nil, err
-	} else if err = f.Close(); err != nil {
-		return nil, err
-	}
-
-	// TODO: Work with 16-bit images
-	img := image.NewRGBA(srcImage.Bounds())
-	draw.Draw(img, img.Bounds(), srcImage, img.Bounds().Min, draw.Src)
-
-	return img, nil
 }

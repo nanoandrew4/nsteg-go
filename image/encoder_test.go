@@ -6,11 +6,13 @@ import (
 	"io"
 	"log"
 	"math/rand"
-	"nsteg/bits"
+	"nsteg/internal"
+	"nsteg/internal/bits"
+	"nsteg/internal/cli"
+	"nsteg/internal/encoder"
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
 const (
@@ -26,9 +28,9 @@ func TestEncode(t *testing.T) {
 		generateImageFile(encTestImage, 100, 100)
 
 		testFiles := generateTestFiles(3, 1024)
-		Encode(encTestImage, encTestOutImage, testFiles, Config{LSBsToUse: LSBsToUse})
+		err := cli.EncodeImageWithFiles(encTestImage, encTestOutImage, testFiles, internal.ImageEncodeConfig{LSBsToUse: LSBsToUse})
 
-		outputImage, err := getImageFromFilePath(encTestOutImage)
+		outputImage, err := cli.getImageFromFilePath(encTestOutImage)
 		if err != nil {
 			t.Fatalf("Error reading output image %s", encTestOutImage)
 		}
@@ -40,11 +42,11 @@ func TestEncode(t *testing.T) {
 		}
 
 		var expectedEncodedBytes []byte
-		expectedEncodedBytes = append(expectedEncodedBytes, intToBitArray(len(testFiles))...)
+		expectedEncodedBytes = append(expectedEncodedBytes, encoder.intToBitArray(len(testFiles))...)
 		for f := 0; f < len(testFiles); f++ {
 			filePathSplit := strings.Split(testFiles[f], "/")
 			fileName := filePathSplit[len(filePathSplit)-1]
-			expectedEncodedBytes = append(expectedEncodedBytes, intToBitArray(len(fileName))...)
+			expectedEncodedBytes = append(expectedEncodedBytes, encoder.intToBitArray(len(fileName))...)
 			expectedEncodedBytes = append(expectedEncodedBytes, fileName...)
 
 			file, err := os.Open(testFiles[f])
@@ -55,7 +57,7 @@ func TestEncode(t *testing.T) {
 			if err != nil {
 				log.Fatalf("Error opening file info for file %s", testFiles[f])
 			}
-			expectedEncodedBytes = append(expectedEncodedBytes, intToBitArray(int(fileStat.Size()))...)
+			expectedEncodedBytes = append(expectedEncodedBytes, encoder.intToBitArray(int(fileStat.Size()))...)
 			fileBytes, err := io.ReadAll(file)
 			if err != nil {
 				log.Fatalf("Error reading file %s", fileName)
@@ -69,7 +71,7 @@ func TestEncode(t *testing.T) {
 			py := currentPixel / outputImage.Bounds().Dx()
 			pixelOffset := outputImage.PixOffset(px, py)
 			pixel := outputImage.Pix[pixelOffset : pixelOffset+4]
-			for channelIdx := byte(0); channelIdx < channelsToWrite; channelIdx++ {
+			for channelIdx := byte(0); channelIdx < encoder.channelsToWrite; channelIdx++ {
 				bitsToCheck := pixel[channelIdx] & (1<<LSBsToUse - 1)
 				expectedBits := testBitReader.ReadBits(uint(LSBsToUse))
 				if bitsToCheck != expectedBits {
@@ -86,8 +88,6 @@ func TestEncode(t *testing.T) {
 }
 
 func BenchmarkEncodeSpeed(b *testing.B) {
-	rand.Seed(time.Now().UnixNano())
-
 	img := generateImage(10000, 10000)
 	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
 		for _, byteSize := range []int{100000, 1000000, 10000000} {
@@ -101,10 +101,10 @@ func BenchmarkEncodeSpeed(b *testing.B) {
 					if err != nil {
 						panic(err)
 					}
-					testImageEncoder := newEncoder(img, LSBsToUse)
+					testImageEncoder := encoder.NewImageEncoder(img, LSBsToUse)
 					bytesReader := bytes.NewReader(bytesToEncode)
 					b.StartTimer()
-					testImageEncoder.encodeDataToImage(bytesReader)
+					testImageEncoder.encodeDataToRawImage(bytesReader)
 				}
 			})
 		}

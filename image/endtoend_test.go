@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"nsteg/internal"
+	"nsteg/internal/encoder"
 	"os"
 	"testing"
 )
@@ -24,7 +26,7 @@ func TestEncodeDecode(t *testing.T) {
 
 		testFiles := generateTestFiles(NumOfFilesToGenerate, ((ImageSize*ImageSize)*int(LSBsToUse*3)-(len(TestFilePrefix)+4*64*NumOfFilesToGenerate+NumOfFilesToGenerate*64))/(NumOfFilesToGenerate*8))
 		originalHashes := calculateFileHashes(testFiles)
-		err := Encode(TestImgName, OutputImgName, testFiles, Config{LSBsToUse: LSBsToUse})
+		err := encoder.Encode(TestImgName, OutputImgName, testFiles, internal.ImageEncodeConfig{LSBsToUse: LSBsToUse})
 		if err != nil {
 			t.Fatal("Error encoding image")
 		}
@@ -54,7 +56,7 @@ func BenchmarkFullEncodeSpeed(b *testing.B) {
 			b.Run(fmt.Sprintf("MBs=%f/LSBsToUse=%d", float64(numOfBytesToEncode)/1000000.0, LSBsToUse), func(b *testing.B) {
 				b.SetBytes(int64(numOfBytesToEncode))
 				for i := 0; i < b.N; i++ {
-					_ = Encode(TestImgName, OutputImgName, filesToHide, Config{LSBsToUse: LSBsToUse})
+					_ = encoder.Encode(TestImgName, OutputImgName, filesToHide, internal.ImageEncodeConfig{LSBsToUse: LSBsToUse})
 				}
 			})
 		}
@@ -69,7 +71,7 @@ func BenchmarkFullDecodeSpeed(b *testing.B) {
 	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
 		for _, numOfBytesToEncode := range []int{100000, 1000000, 10000000} {
 			filesToHide := generateTestFiles(NumOfFilesToGenerate, numOfBytesToEncode/NumOfFilesToGenerate)
-			_ = Encode(TestImgName, OutputImgName, filesToHide, Config{LSBsToUse: LSBsToUse})
+			_ = encoder.Encode(TestImgName, OutputImgName, filesToHide, internal.ImageEncodeConfig{LSBsToUse: LSBsToUse})
 			b.Run(fmt.Sprintf("MBs=%f/LSBsToUse=%d", float64(numOfBytesToEncode)/1000000.0, LSBsToUse), func(b *testing.B) {
 				b.SetBytes(int64(numOfBytesToEncode))
 				for i := 0; i < b.N; i++ {

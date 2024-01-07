@@ -1,22 +1,22 @@
-package stegimg
+package internal
 
 import "image/png"
 
 const (
-	defaultChunkSizeMultiplier = 32 * 1024
+	DefaultChunkSizeMultiplier = 32 * 1024
 )
 
-type Config struct {
+type ImageEncodeConfig struct {
 	LSBsToUse           byte
 	ChunkSizeMultiplier int
 	PngCompressionLevel png.CompressionLevel
 }
 
-func (c Config) populateUnsetConfigVars() {
+func (c ImageEncodeConfig) PopulateUnsetConfigVars() {
 	if c.LSBsToUse < 1 || c.LSBsToUse > 8 {
 		c.LSBsToUse = 3
 	}
 	if c.ChunkSizeMultiplier < 1 {
-		c.ChunkSizeMultiplier = defaultChunkSizeMultiplier
+		c.ChunkSizeMultiplier = DefaultChunkSizeMultiplier
 	}
 }

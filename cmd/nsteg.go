@@ -6,6 +6,9 @@ import (
 	"image/png"
 	"log"
 	image "nsteg/image"
+	"nsteg/internal"
+	"nsteg/internal/cli"
+	"nsteg/internal/server"
 	"os"
 	"strings"
 )
@@ -25,12 +28,15 @@ func main() {
 
 		decode           = app.Command("decode", "Decode files from previously encoded media file")
 		encodedMediaFile = decode.Arg("encoded-media-file", "Media file containing encoded data").Required().String()
+
+		serve = app.Command("serve", "Start webserver")
+		port  = serve.Flag("port", "Port to start server on").Default("8080").String()
 	)
 
 	var err error
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case "encode image":
-		err = image.Encode(*srcMediaFile, *outputFile, strings.Split(*filesToHide, ","), image.Config{
+		err = cli.EncodeImageWithFiles(*srcMediaFile, *outputFile, strings.Split(*filesToHide, ","), internal.ImageEncodeConfig{
 			LSBsToUse:           byte(*LSBsToUse),
 			PngCompressionLevel: png.CompressionLevel(*pngCompressionLevel),
 		})
@@ -42,6 +48,8 @@ func main() {
 		if err != nil {
 			fmt.Printf("Error during image decode: %v\n", err)
 		}
+	case "serve":
+		server.StartServer(*port)
 	default:
 		log.Fatal("Unknown options")
 	}

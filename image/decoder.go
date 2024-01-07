@@ -2,11 +2,12 @@ package stegimg
 
 import (
 	"image"
+	"nsteg/internal/cli"
 	"os"
 )
 
 func DecodeImg(encodedMediaFile string) error {
-	srcImage, err := getImageFromFilePath(encodedMediaFile)
+	srcImage, err := cli.GetImageFromFilePath(encodedMediaFile)
 	if err != nil {
 		return err
 	}

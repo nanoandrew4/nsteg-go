@@ -1,0 +1,7 @@
+namespace nsteg.EncodeImage;
+
+table ImageEncodeResponse {
+    encoded_image: [ubyte];
+}
+
+root_type ImageEncodeResponse;
