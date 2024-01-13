@@ -1,4 +1,4 @@
-package stegimg
+package image
 
 import (
 	"image"

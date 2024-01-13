@@ -1,55 +1,76 @@
-package stegimg
+package image
 
 import (
+	"errors"
 	"image"
-	"nsteg/internal/cli"
-	"os"
+	"nsteg/pkg/model"
 )
 
-func DecodeImg(encodedMediaFile string) error {
-	srcImage, err := cli.GetImageFromFilePath(encodedMediaFile)
-	if err != nil {
-		return err
-	}
+var (
+	// TODO: could encode static string as first n bytes for checking
+	ErrDecodeFileBounds = errors.New("decoding exceeded image bounds, the file was likely not encoded using nsteg")
+)
 
-	decoder := newImageDecoder(srcImage)
-	decoder.decodeLSBsToUse()
-
-	numOfFilesToDecode := bytesToInt(decoder.readBytes(8))
-	for f := 0; f < numOfFilesToDecode; f++ {
-		fileNameLength := bytesToInt(decoder.readBytes(8))
-		fileName := string(decoder.readBytes(fileNameLength))
-		fileLength := bytesToInt(decoder.readBytes(8))
-		fileBytes := decoder.readBytes(fileLength)
-		err = os.WriteFile(fileName, fileBytes, 0664)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type imageDecoder struct {
+type Decoder struct {
 	LSBsToUse, currentPixelBit byte
 	currentPixel               int
 
 	image *image.RGBA
 }
 
-func newImageDecoder(image *image.RGBA) *imageDecoder {
-	return &imageDecoder{
+func NewImageDecoder(image *image.RGBA) *Decoder {
+	d := &Decoder{
 		image: image,
 	}
+
+	d.decodeLSBsToUse()
+	return d
 }
 
-func (d *imageDecoder) incrementCurrentPixel() {
+func (d *Decoder) DecodeFiles() ([]model.OutputFile, error) {
+	var decodedFiles []model.OutputFile
+
+	numOfFilesToDecodeBytes, err := d.readBytes(8)
+	if err != nil {
+		return nil, err
+	}
+	for f := 0; f < bytesToInt(numOfFilesToDecodeBytes); f++ {
+		fileNameLength, err := d.readBytes(8)
+		if err != nil {
+			return nil, err
+		}
+		fileName, err := d.readBytes(bytesToInt(fileNameLength))
+		if err != nil {
+			return nil, err
+		}
+		fileLength, err := d.readBytes(8)
+		if err != nil {
+			return nil, err
+		}
+
+		fileBytes, err := d.readBytes(bytesToInt(fileLength))
+		if err != nil {
+			return nil, err
+		}
+
+		decodedFiles = append(decodedFiles, model.OutputFile{
+			Name:    string(fileName),
+			Content: fileBytes,
+		})
+	}
+
+	return decodedFiles, nil
+}
+
+func (d *Decoder) incrementCurrentPixel() {
 	d.currentPixel++
 	if d.currentPixel%4 == 3 { // Skip alpha channel
 		d.currentPixel++
 	}
 }
 
-func (d *imageDecoder) decodeLSBsToUse() {
+func (d *Decoder) decodeLSBsToUse() {
+	// Find first opaque pixel, which will contain the LSBs
 	for p := 3; p < len(d.image.Pix); p += 4 {
 		if d.image.Pix[p] == 255 {
 			d.currentPixel = p - 3
@@ -62,11 +83,15 @@ func (d *imageDecoder) decodeLSBsToUse() {
 	d.currentPixel += 4
 }
 
-func (d *imageDecoder) readBytes(numOfBytesToRead int) []byte {
+func (d *Decoder) readBytes(numOfBytesToRead int) ([]byte, error) {
 	readBytes := make([]byte, numOfBytesToRead)
 	var currByte, currBit byte
 	var currByteIdx int
 	for currByteIdx < numOfBytesToRead {
+		if d.currentPixel >= len(d.image.Pix) {
+			return nil, ErrDecodeFileBounds
+		}
+
 		var currentPixelAlpha = d.image.Pix[(d.currentPixel/4)*4+3]
 		if currentPixelAlpha != 255 {
 			d.currentPixel += 4
@@ -98,7 +123,7 @@ func (d *imageDecoder) readBytes(numOfBytesToRead int) []byte {
 		}
 	}
 
-	return readBytes
+	return readBytes, nil
 }
 
 func bytesToInt(bytes []byte) int {

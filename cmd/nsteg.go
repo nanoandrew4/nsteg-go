@@ -5,10 +5,9 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 	"image/png"
 	"log"
-	image "nsteg/image"
-	"nsteg/internal"
 	"nsteg/internal/cli"
 	"nsteg/internal/server"
+	"nsteg/pkg/config"
 	"os"
 	"strings"
 )
@@ -36,7 +35,7 @@ func main() {
 	var err error
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case "encode image":
-		err = cli.EncodeImageWithFiles(*srcMediaFile, *outputFile, strings.Split(*filesToHide, ","), internal.ImageEncodeConfig{
+		err = cli.EncodeImageWithFiles(*srcMediaFile, *outputFile, strings.Split(*filesToHide, ","), config.ImageEncodeConfig{
 			LSBsToUse:           byte(*LSBsToUse),
 			PngCompressionLevel: png.CompressionLevel(*pngCompressionLevel),
 		})
@@ -44,7 +43,7 @@ func main() {
 			fmt.Printf("Error during image encode: %v\n", err)
 		}
 	case "decode":
-		err = image.DecodeImg(*encodedMediaFile)
+		err = cli.DecodeFilesFromImage(*encodedMediaFile)
 		if err != nil {
 			fmt.Printf("Error during image decode: %v\n", err)
 		}

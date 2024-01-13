@@ -1,4 +1,4 @@
-package stegimg
+package image
 
 import (
 	"crypto/rand"
@@ -21,7 +21,7 @@ func BenchmarkDecodeSpeed(b *testing.B) {
 					if err != nil {
 						panic(err)
 					}
-					testImageDecoder := imageDecoder{
+					testImageDecoder := Decoder{
 						image:     img,
 						LSBsToUse: LSBsToUse,
 					}

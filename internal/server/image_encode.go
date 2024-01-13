@@ -11,8 +11,9 @@ import (
 	"net/http"
 	"nsteg/api"
 	"nsteg/api/nsteg/EncodeImage"
-	"nsteg/internal"
-	"nsteg/pkg/encoder"
+	"nsteg/pkg/config"
+	nstegImage "nsteg/pkg/image"
+	"nsteg/pkg/model"
 )
 
 // EncodeImageHandler godoc
@@ -31,13 +32,13 @@ func EncodeImageHandler(ctx *gin.Context) {
 	var requestBody api.EncodeImageRequest
 
 	if err := ctx.ShouldBindJSON(&requestBody); err != nil {
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, api.Error{Error: "Error reading request body"})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, errRequestBodyDecode)
 		return
 	}
 
 	imageToEncode, _, err := image.Decode(bytes.NewReader(requestBody.ImageToEncode))
 	if err != nil {
-		ctx.AbortWithStatusJSON(http.StatusBadRequest, api.Error{Code: "invalid_image", Error: "Supplied image to encode is invalid"})
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, errInvalidImage)
 		return
 	}
 
@@ -45,17 +46,17 @@ func EncodeImageHandler(ctx *gin.Context) {
 	draw.Draw(rgbaImg, rgbaImg.Bounds(), imageToEncode, rgbaImg.Bounds().Min, draw.Src)
 	imageToEncode = nil
 
-	imageEncoder := encoder.NewImageEncoder(rgbaImg, internal.ImageEncodeConfig{
+	imageEncoder := nstegImage.NewImageEncoder(rgbaImg, config.ImageEncodeConfig{
 		LSBsToUse:           requestBody.LsbsToUse,
 		PngCompressionLevel: png.BestCompression, // to reduce bandwidth costs since lower compression results in huge images
 	})
 
-	var filesToHide []internal.FileToHide
+	var filesToHide []model.InputFile
 	for _, reqFileToHide := range requestBody.FilesToHide {
-		filesToHide = append(filesToHide, internal.FileToHide{
+		filesToHide = append(filesToHide, model.InputFile{
 			Name:    reqFileToHide.Name,
-			Size:    int64(len(reqFileToHide.Content)),
 			Content: bytes.NewReader(reqFileToHide.Content),
+			Size:    int64(len(reqFileToHide.Content)),
 		})
 	}
 
@@ -88,12 +89,12 @@ func handleImageEncodeRequest(w http.ResponseWriter, r *http.Request) {
 	draw.Draw(rgbaImg, rgbaImg.Bounds(), imageToEncode, rgbaImg.Bounds().Min, draw.Src)
 	imageToEncode = nil
 
-	imageEncoder := encoder.NewImageEncoder(rgbaImg, internal.ImageEncodeConfig{
+	imageEncoder := nstegImage.NewImageEncoder(rgbaImg, config.ImageEncodeConfig{
 		LSBsToUse:           encodeImageRequest.LsbsToUse(),
 		PngCompressionLevel: png.BestCompression, // to reduce bandwidth costs since lower compression results in huge images
 	})
 
-	var filesToHide []internal.FileToHide
+	var filesToHide []model.InputFile
 	for i := 0; i < encodeImageRequest.FilesToHideLength(); i++ {
 		var fbFileToHide EncodeImage.FileToHide
 		read := encodeImageRequest.FilesToHide(&fbFileToHide, i)
@@ -102,7 +103,7 @@ func handleImageEncodeRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		filesToHide = append(filesToHide, internal.FileToHide{
+		filesToHide = append(filesToHide, model.InputFile{
 			Name:    string(fbFileToHide.Name()),
 			Size:    int64(fbFileToHide.ContentLength()),
 			Content: bytes.NewReader(fbFileToHide.ContentBytes()),

@@ -5,8 +5,3 @@ type EncodeImageRequest struct {
 	ImageToEncode []byte       `json:"image_to_encode"`
 	FilesToHide   []FileToHide `json:"files_to_hide"`
 }
-
-type FileToHide struct {
-	Name    string `json:"name"`
-	Content []byte `json:"content"`
-}

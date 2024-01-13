@@ -1,4 +1,4 @@
-package encoder
+package image
 
 import (
 	"bytes"
@@ -7,8 +7,9 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
-	"nsteg/internal"
 	"nsteg/internal/bits"
+	"nsteg/pkg/config"
+	"nsteg/pkg/model"
 	"os"
 	"sync"
 )
@@ -27,37 +28,37 @@ func init() {
 	image.RegisterFormat("png", "png", png.Decode, png.DecodeConfig)
 }
 
-type ImageEncoder struct {
+type Encoder struct {
 	lsbsToUse                         byte
 	minChunkSize, chunkSizeMultiplier int
 	currentByte, currentPixel         int
 
 	image  *image.RGBA
-	config internal.ImageEncodeConfig
+	config config.ImageEncodeConfig
 }
 
-func NewImageEncoder(image *image.RGBA, config internal.ImageEncodeConfig) *ImageEncoder {
-	config.PopulateUnsetConfigVars()
+func NewImageEncoder(image *image.RGBA, iConfig config.ImageEncodeConfig) *Encoder {
+	iConfig.PopulateUnsetConfigVars()
 
-	enc := &ImageEncoder{
+	enc := &Encoder{
 		image:               image,
-		config:              config,
-		lsbsToUse:           config.LSBsToUse,
-		minChunkSize:        int(config.LSBsToUse) * int(channelsToWrite),
-		chunkSizeMultiplier: internal.DefaultChunkSizeMultiplier,
+		config:              iConfig,
+		lsbsToUse:           iConfig.LSBsToUse,
+		minChunkSize:        int(iConfig.LSBsToUse) * int(channelsToWrite),
+		chunkSizeMultiplier: config.DefaultChunkSizeMultiplier,
 	}
 
 	enc.encodeLSBsToImage()
 	return enc
 }
 
-func (ie *ImageEncoder) Encode(dataReader io.Reader, output io.Writer) error {
+func (ie *Encoder) Encode(dataReader io.Reader, output io.Writer) error {
 	ie.encodeDataToRawImage(dataReader)
 
 	return ie.encodeRawImage(output)
 }
 
-func (ie *ImageEncoder) EncodeFiles(files []internal.FileToHide, output io.Writer) error {
+func (ie *Encoder) EncodeFiles(files []model.InputFile, output io.Writer) error {
 	dataToEncode, err := ie.setupDataReader(files)
 	if err != nil {
 		return err
@@ -67,7 +68,7 @@ func (ie *ImageEncoder) EncodeFiles(files []internal.FileToHide, output io.Write
 	return ie.encodeRawImage(output)
 }
 
-func (ie *ImageEncoder) encodeLSBsToImage() {
+func (ie *Encoder) encodeLSBsToImage() {
 	packedLSBsToUse := ie.lsbsToUse - 1 // Save LSBs to use as value 0-7 so it fits in 3 bits (one pixel)
 	LSBsBitReader := bits.NewBitReader([]byte{packedLSBsToUse})
 
@@ -84,7 +85,7 @@ func (ie *ImageEncoder) encodeLSBsToImage() {
 	ie.currentPixel++
 }
 
-func (ie *ImageEncoder) setupDataReader(filesToHide []internal.FileToHide) (io.Reader, error) {
+func (ie *Encoder) setupDataReader(filesToHide []model.InputFile) (io.Reader, error) {
 	var dataReaders []io.Reader
 
 	// Scan ahead to count opaque pixels
@@ -118,7 +119,7 @@ func (ie *ImageEncoder) setupDataReader(filesToHide []internal.FileToHide) (io.R
 	return io.MultiReader(dataReaders...), nil
 }
 
-func (ie *ImageEncoder) encodeDataToRawImage(dataReader io.Reader) {
+func (ie *Encoder) encodeDataToRawImage(dataReader io.Reader) {
 	chunkSize := ie.minChunkSize * ie.chunkSizeMultiplier
 
 	bytesRead := chunkSize
@@ -144,7 +145,7 @@ func (ie *ImageEncoder) encodeDataToRawImage(dataReader io.Reader) {
 	wg.Wait()
 }
 
-func (ie *ImageEncoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LSBsToUse byte) {
+func (ie *Encoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LSBsToUse byte) {
 	pixelChannelsToOverwrite := ie.image.Pix[pixelToWriteTo*4 : pixelToWriteTo*4+4]
 	// Skip non-opaque pixels, since data encoded in them cannot be fully recovered reliably
 	if pixelChannelsToOverwrite[3] != 255 {
@@ -158,12 +159,12 @@ func (ie *ImageEncoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LS
 	}
 }
 
-func (ie *ImageEncoder) encodeRawImage(outputWriter io.Writer) error {
+func (ie *Encoder) encodeRawImage(outputWriter io.Writer) error {
 	enc := png.Encoder{CompressionLevel: ie.config.PngCompressionLevel}
 	return enc.Encode(outputWriter, ie.image)
 }
 
-func (ie *ImageEncoder) saveAsPng(outputPath string, config internal.ImageEncodeConfig) error {
+func (ie *Encoder) saveAsPng(outputPath string, config config.ImageEncodeConfig) error {
 	f, err := os.Create(outputPath)
 	if err != nil {
 		return err

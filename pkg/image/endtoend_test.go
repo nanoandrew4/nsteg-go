@@ -1,12 +1,12 @@
-package stegimg
+package image
 
 import (
 	"crypto/sha256"
 	"fmt"
 	"io"
 	"log"
-	"nsteg/internal"
-	"nsteg/internal/encoder"
+	"nsteg/internal/image"
+	"nsteg/pkg/config"
 	"os"
 	"testing"
 )
@@ -26,14 +26,14 @@ func TestEncodeDecode(t *testing.T) {
 
 		testFiles := generateTestFiles(NumOfFilesToGenerate, ((ImageSize*ImageSize)*int(LSBsToUse*3)-(len(TestFilePrefix)+4*64*NumOfFilesToGenerate+NumOfFilesToGenerate*64))/(NumOfFilesToGenerate*8))
 		originalHashes := calculateFileHashes(testFiles)
-		err := encoder.Encode(TestImgName, OutputImgName, testFiles, internal.ImageEncodeConfig{LSBsToUse: LSBsToUse})
+		err := image.Encode(TestImgName, OutputImgName, testFiles, config.ImageEncodeConfig{LSBsToUse: LSBsToUse})
 		if err != nil {
 			t.Fatal("Error encoding image")
 		}
 
 		deleteFiles(testFiles)
 
-		DecodeImg(OutputImgName)
+		image.DecodeImg(OutputImgName)
 		decodedHashes := calculateFileHashes(testFiles)
 
 		for i := 0; i < len(testFiles); i++ {
@@ -56,7 +56,7 @@ func BenchmarkFullEncodeSpeed(b *testing.B) {
 			b.Run(fmt.Sprintf("MBs=%f/LSBsToUse=%d", float64(numOfBytesToEncode)/1000000.0, LSBsToUse), func(b *testing.B) {
 				b.SetBytes(int64(numOfBytesToEncode))
 				for i := 0; i < b.N; i++ {
-					_ = encoder.Encode(TestImgName, OutputImgName, filesToHide, internal.ImageEncodeConfig{LSBsToUse: LSBsToUse})
+					_ = image.Encode(TestImgName, OutputImgName, filesToHide, config.ImageEncodeConfig{LSBsToUse: LSBsToUse})
 				}
 			})
 		}
@@ -71,11 +71,11 @@ func BenchmarkFullDecodeSpeed(b *testing.B) {
 	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
 		for _, numOfBytesToEncode := range []int{100000, 1000000, 10000000} {
 			filesToHide := generateTestFiles(NumOfFilesToGenerate, numOfBytesToEncode/NumOfFilesToGenerate)
-			_ = encoder.Encode(TestImgName, OutputImgName, filesToHide, internal.ImageEncodeConfig{LSBsToUse: LSBsToUse})
+			_ = image.Encode(TestImgName, OutputImgName, filesToHide, config.ImageEncodeConfig{LSBsToUse: LSBsToUse})
 			b.Run(fmt.Sprintf("MBs=%f/LSBsToUse=%d", float64(numOfBytesToEncode)/1000000.0, LSBsToUse), func(b *testing.B) {
 				b.SetBytes(int64(numOfBytesToEncode))
 				for i := 0; i < b.N; i++ {
-					DecodeImg(OutputImgName)
+					image.DecodeImg(OutputImgName)
 				}
 			})
 		}
