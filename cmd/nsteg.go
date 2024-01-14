@@ -9,13 +9,17 @@ import (
 	"nsteg/internal/server"
 	"nsteg/pkg/config"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 )
 
 func main() {
 
 	var (
-		app = kingpin.New("nsteg", "Steganography application written in Go")
+		app           = kingpin.New("nsteg", "Steganography application written in Go")
+		cpuProfile    = app.Flag("cpu-profile", "Dump CPU profile into the supplied file").String()
+		memProfileDir = app.Flag("mem-profile-dir", "Dump memory profiles into the supplied directory").String()
 
 		encode              = app.Command("encode", "Encode files into a media file")
 		srcMediaFile        = encode.Flag("src-media-file", "Media file to encode data into (original will not be touched)").Required().ExistingFile()
@@ -32,8 +36,38 @@ func main() {
 		port  = serve.Flag("port", "Port to start server on").Default("8080").String()
 	)
 
+	parsedArgs := kingpin.MustParse(app.Parse(os.Args[1:]))
+
+	var cpuProfTeardown, memProfTeardown func()
+	if cpuProfile != nil && *cpuProfile != "" {
+		cpuProfTeardown = setupCPUProfilingAndReturnTeardown(*cpuProfile)
+		defer cpuProfTeardown()
+	}
+
+	if memProfileDir != nil && *memProfileDir != "" {
+		memProfTeardown = setupMemProfilingAndReturnTeardown(*memProfileDir)
+		defer memProfTeardown()
+	}
+
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM) // subscribe to system signals
+	onKill := func(c chan os.Signal) {
+		select {
+		case <-c:
+			if cpuProfTeardown != nil {
+				cpuProfTeardown()
+			}
+			if memProfTeardown != nil {
+				memProfTeardown()
+			}
+			os.Exit(0)
+		}
+	}
+
+	go onKill(c)
+
 	var err error
-	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
+	switch parsedArgs {
 	case "encode image":
 		err = cli.EncodeImageWithFiles(*srcMediaFile, *outputFile, strings.Split(*filesToHide, ","), config.ImageEncodeConfig{
 			LSBsToUse:           byte(*LSBsToUse),
@@ -51,5 +85,25 @@ func main() {
 		server.StartServer(*port)
 	default:
 		log.Fatal("Unknown options")
+	}
+}
+
+func setupCPUProfilingAndReturnTeardown(cpuProfile string) (deferredTeardown func()) {
+	cpuProfileFile, err := os.Create(cpuProfile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	config.StartCPUProfiler(cpuProfileFile)
+
+	return func() {
+		config.StopCPUProfiler()
+		cpuProfileFile.Close()
+	}
+}
+
+func setupMemProfilingAndReturnTeardown(memProfileDir string) (deferredTeardown func()) {
+	config.StartMemoryProfiler(memProfileDir)
+	return func() {
+		config.StopMemoryProfiler()
 	}
 }

@@ -1,113 +1,78 @@
 package image
 
 import (
-	"crypto/sha256"
+	"crypto/sha512"
 	"fmt"
+	"image/png"
 	"io"
-	"log"
-	"nsteg/internal/image"
 	"nsteg/pkg/config"
-	"os"
+	"nsteg/pkg/model"
 	"testing"
 )
 
-const TestFolderName = "test"
-const TestImgName = "testimg.png"
-const OutputImgName = "output.png"
 const TestFilePrefix = "testfile_"
-const NumOfFilesToGenerate = 5
-const ImageSize = 5000
+const ImageSize = 3000
 
-func TestEncodeDecode(t *testing.T) {
-	chdirToTestFileDir(TestFolderName)
+func TestEncodeDecodeOnOpaqueImage(t *testing.T) {
+	testEncodeDecode(t, false)
+}
 
-	for LSBsToUse := byte(1); LSBsToUse <= 1; LSBsToUse++ {
-		generateImageFile(TestImgName, ImageSize, ImageSize)
+func TestEncodeDecodeOnPartiallyOpaqueImage(t *testing.T) {
+	testEncodeDecode(t, true)
+}
 
-		testFiles := generateTestFiles(NumOfFilesToGenerate, ((ImageSize*ImageSize)*int(LSBsToUse*3)-(len(TestFilePrefix)+4*64*NumOfFilesToGenerate+NumOfFilesToGenerate*64))/(NumOfFilesToGenerate*8))
-		originalHashes := calculateFileHashes(testFiles)
-		err := image.Encode(TestImgName, OutputImgName, testFiles, config.ImageEncodeConfig{LSBsToUse: LSBsToUse})
+func testEncodeDecode(t *testing.T, randomizePixelOpaqueness bool) {
+	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
+		imageToEncode, opaquePixels := generateImage(ImageSize, ImageSize, randomizePixelOpaqueness)
+
+		testFiles := generateFilesToEncode((opaquePixels * int(LSBsToUse) * 3) / 8)
+		originalHashes := calculateInputFileHashes(testFiles)
+		encoder := NewImageEncoder(imageToEncode, config.ImageEncodeConfig{
+			LSBsToUse:           LSBsToUse,
+			PngCompressionLevel: png.NoCompression,
+		})
+		err := encoder.EncodeFiles(convertTestInputToStandardInput(testFiles), io.Discard)
 		if err != nil {
-			t.Fatal("Error encoding image")
+			t.Fatalf("Error encoding image: %s", err)
 		}
 
-		deleteFiles(testFiles)
-
-		image.DecodeImg(OutputImgName)
-		decodedHashes := calculateFileHashes(testFiles)
+		decoder := NewImageDecoder(encoder.image)
+		decodedFiles, err := decoder.DecodeFiles()
+		if err != nil {
+			t.Errorf("Error decoding image with %d LSBs: %s", LSBsToUse, err)
+			continue
+		}
+		decodedHashes := calculateOutputFileHashes(decodedFiles)
 
 		for i := 0; i < len(testFiles); i++ {
 			if originalHashes[i] != decodedHashes[i] {
-				t.Errorf("Hash for file %d is not the same after decoding - %s != %s | using %d LSBs", i, originalHashes[i], decodedHashes[i], LSBsToUse)
+				t.Errorf("Hash for file %d is not the same after decoding | using %d LSBs", i, LSBsToUse)
 			}
 		}
 	}
-
-	os.Chdir("..")
-	os.RemoveAll(TestFolderName)
 }
 
-func BenchmarkFullEncodeSpeed(b *testing.B) {
-	chdirToTestFileDir(TestFolderName)
-	generateImageFile(TestImgName, ImageSize, ImageSize)
-	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
-		for _, numOfBytesToEncode := range []int{100000, 1000000, 10000000} {
-			filesToHide := generateTestFiles(NumOfFilesToGenerate, numOfBytesToEncode/NumOfFilesToGenerate)
-			b.Run(fmt.Sprintf("MBs=%f/LSBsToUse=%d", float64(numOfBytesToEncode)/1000000.0, LSBsToUse), func(b *testing.B) {
-				b.SetBytes(int64(numOfBytesToEncode))
-				for i := 0; i < b.N; i++ {
-					_ = image.Encode(TestImgName, OutputImgName, filesToHide, config.ImageEncodeConfig{LSBsToUse: LSBsToUse})
-				}
-			})
-		}
-	}
-	os.Chdir("..")
-	os.RemoveAll(TestFolderName)
-}
+func calculateInputFileHashes(file []testInputFile) []string {
+	hashes := make([]string, len(file), len(file))
 
-func BenchmarkFullDecodeSpeed(b *testing.B) {
-	chdirToTestFileDir(TestFolderName)
-	generateImageFile(TestImgName, ImageSize, ImageSize)
-	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
-		for _, numOfBytesToEncode := range []int{100000, 1000000, 10000000} {
-			filesToHide := generateTestFiles(NumOfFilesToGenerate, numOfBytesToEncode/NumOfFilesToGenerate)
-			_ = image.Encode(TestImgName, OutputImgName, filesToHide, config.ImageEncodeConfig{LSBsToUse: LSBsToUse})
-			b.Run(fmt.Sprintf("MBs=%f/LSBsToUse=%d", float64(numOfBytesToEncode)/1000000.0, LSBsToUse), func(b *testing.B) {
-				b.SetBytes(int64(numOfBytesToEncode))
-				for i := 0; i < b.N; i++ {
-					image.DecodeImg(OutputImgName)
-				}
-			})
-		}
-	}
-	os.Chdir("..")
-	os.RemoveAll(TestFolderName)
-}
-
-func deleteFiles(filesToDelete []string) {
-	for _, file := range filesToDelete {
-		err := os.Remove(file)
-		if err != nil {
-			panic(err)
-		}
-	}
-}
-
-func calculateFileHashes(fileNames []string) []string {
-	hashes := make([]string, len(fileNames), len(fileNames))
-
-	for idx, fileName := range fileNames {
-		f, err := os.Open(fileName)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		h := sha256.New()
-		if _, err := io.Copy(h, f); err != nil {
-			log.Fatal(err)
-		}
+	for idx, file := range file {
+		h := sha512.New()
+		h.Write([]byte(file.Name))
+		h.Write(file.Content)
 		hashes[idx] = fmt.Sprintf("%x", h.Sum(nil))
-		f.Close()
+	}
+
+	return hashes
+}
+
+func calculateOutputFileHashes(file []model.OutputFile) []string {
+	hashes := make([]string, len(file), len(file))
+
+	for idx, file := range file {
+		h := sha512.New()
+		h.Write([]byte(file.Name))
+		h.Write(file.Content)
+		hashes[idx] = fmt.Sprintf("%x", h.Sum(nil))
 	}
 
 	return hashes

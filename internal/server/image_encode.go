@@ -48,7 +48,7 @@ func EncodeImageHandler(ctx *gin.Context) {
 
 	imageEncoder := nstegImage.NewImageEncoder(rgbaImg, config.ImageEncodeConfig{
 		LSBsToUse:           requestBody.LsbsToUse,
-		PngCompressionLevel: png.BestCompression, // to reduce bandwidth costs since lower compression results in huge images
+		PngCompressionLevel: png.DefaultCompression, // to reduce bandwidth costs since lower compression results in huge images
 	})
 
 	var filesToHide []model.InputFile

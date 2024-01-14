@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
+// TODO: rewrite
 func BenchmarkDecodeSpeed(b *testing.B) {
-	img := generateImage(10000, 10000)
+	img, _ := generateImage(10000, 10000, false)
 	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
 		for _, bytesToRead := range []int{100000, 1000000, 10000000} {
 			numOfBytesToEncode := bytesToRead
@@ -26,7 +27,7 @@ func BenchmarkDecodeSpeed(b *testing.B) {
 						LSBsToUse: LSBsToUse,
 					}
 					b.StartTimer()
-					testImageDecoder.readBytes(bytesToRead)
+					testImageDecoder.readBytes(uint(bytesToRead))
 				}
 			})
 		}

@@ -15,6 +15,11 @@ func (br *BitReader) BytesLeftToRead() int {
 	return len(br.bytes)
 }
 
+func (br *BitReader) Reset() {
+	br.bytes = nil
+	br.currentBitIdx = 0
+}
+
 // Will likely overwrite all channels in last pixel even if not necessary
 func (br *BitReader) ReadBits(bitsToRead uint) (byteWithRequestedBits byte) {
 	for bitsRead := uint(0); bitsRead < bitsToRead && len(br.bytes) > 0; {

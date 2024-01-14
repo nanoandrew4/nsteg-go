@@ -6,9 +6,13 @@ import (
 	"nsteg/pkg/model"
 )
 
+const (
+	MaxBytesAllocatedAtOnce = 1000 * 1000 * 1000
+)
+
 var (
-	// TODO: could encode static string as first n bytes for checking
 	ErrDecodeFileBounds = errors.New("decoding exceeded image bounds, the file was likely not encoded using nsteg")
+	ErrMaxAllocExceeded = errors.New("tried to allocate too much memory at once during decoding, which could lead to OOM panic")
 )
 
 type Decoder struct {
@@ -30,25 +34,24 @@ func NewImageDecoder(image *image.RGBA) *Decoder {
 func (d *Decoder) DecodeFiles() ([]model.OutputFile, error) {
 	var decodedFiles []model.OutputFile
 
-	numOfFilesToDecodeBytes, err := d.readBytes(8)
+	numOfFilesToDecode, err := d.readUInt()
 	if err != nil {
 		return nil, err
 	}
-	for f := 0; f < bytesToInt(numOfFilesToDecodeBytes); f++ {
-		fileNameLength, err := d.readBytes(8)
+	for f := uint(0); f < numOfFilesToDecode; f++ {
+		fileNameLength, err := d.readUInt()
 		if err != nil {
 			return nil, err
 		}
-		fileName, err := d.readBytes(bytesToInt(fileNameLength))
+		fileName, err := d.readBytes(fileNameLength)
 		if err != nil {
 			return nil, err
 		}
-		fileLength, err := d.readBytes(8)
+		fileLength, err := d.readUInt()
 		if err != nil {
 			return nil, err
 		}
-
-		fileBytes, err := d.readBytes(bytesToInt(fileLength))
+		fileBytes, err := d.readBytes(fileLength)
 		if err != nil {
 			return nil, err
 		}
@@ -83,10 +86,22 @@ func (d *Decoder) decodeLSBsToUse() {
 	d.currentPixel += 4
 }
 
-func (d *Decoder) readBytes(numOfBytesToRead int) ([]byte, error) {
+func (d *Decoder) readUInt() (uint, error) {
+	intBytes, err := d.readBytes(8)
+	if err != nil {
+		return 0, err
+	}
+	return bytesToInt(intBytes), nil
+}
+
+func (d *Decoder) readBytes(numOfBytesToRead uint) (b []byte, retErr error) {
+	if numOfBytesToRead > MaxBytesAllocatedAtOnce {
+		return nil, ErrMaxAllocExceeded
+	}
+
 	readBytes := make([]byte, numOfBytesToRead)
 	var currByte, currBit byte
-	var currByteIdx int
+	var currByteIdx uint
 	for currByteIdx < numOfBytesToRead {
 		if d.currentPixel >= len(d.image.Pix) {
 			return nil, ErrDecodeFileBounds
@@ -104,6 +119,9 @@ func (d *Decoder) readBytes(numOfBytesToRead int) ([]byte, error) {
 			currBit += bitsLeftToReadInPixel
 			d.currentPixelBit = 0
 			d.incrementCurrentPixel()
+			if d.currentPixel >= len(d.image.Pix) {
+				return nil, ErrDecodeFileBounds
+			}
 		}
 
 		if currBit+d.LSBsToUse <= 8 {
@@ -126,13 +144,13 @@ func (d *Decoder) readBytes(numOfBytesToRead int) ([]byte, error) {
 	return readBytes, nil
 }
 
-func bytesToInt(bytes []byte) int {
-	var intFromBytes int
+func bytesToInt(bytes []byte) uint {
+	var intFromBytes uint
 	for i := 0; i < 7; i++ {
-		intFromBytes += int(bytes[i])
+		intFromBytes += uint(bytes[i])
 		intFromBytes <<= 8
 	}
-	intFromBytes += int(bytes[len(bytes)-1])
+	intFromBytes += uint(bytes[len(bytes)-1])
 
 	return intFromBytes
 }

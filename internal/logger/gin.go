@@ -21,11 +21,13 @@ func logFormatter(param gin.LogFormatterParams) string {
 	}
 
 	if param.ErrorMessage == "" {
-		return fmt.Sprintf("{\"timestamp\":\"%v\", \"status_code\": \"%d\", \"latency\": \"%v\", \"latency_raw\": \"%d\", \"request_size\": \"%s\", \"request_size_raw\": \"%d\", \"client_ip\":\"%s\", \"method\": \"%s\", \"path\": \"%v\"}\n",
+		return fmt.Sprintf("{\"timestamp\":\"%v\", \"status_code\": \"%d\", \"latency\": \"%v\", \"latency_raw\": \"%d\", \"request_size\": \"%s\", \"request_size_raw\": \"%d\", \"response_size\": \"%s\", \"response_size_raw\": \"%d\", \"client_ip\":\"%s\", \"method\": \"%s\", \"path\": \"%v\"}\n",
 			param.TimeStamp.Format(RFC3339Millis),
 			param.StatusCode,
 			param.Latency,
 			param.Latency,
+			humanize.Bytes(uint64(param.Request.ContentLength)),
+			param.Request.ContentLength,
 			humanize.Bytes(uint64(param.BodySize)),
 			param.BodySize,
 			param.ClientIP,
@@ -35,11 +37,13 @@ func logFormatter(param gin.LogFormatterParams) string {
 	}
 
 	// TODO: validate that JSON produced is valid with marshal/unmarshal test
-	return fmt.Sprintf("{\"timestamp\":\"%v\", \"status_code\": \"%d\", \"latency\": \"%v\", \"latency_raw\": \"%d\", \"request_size\": \"%s\", \"request_size_raw\": \"%d\", \"client_ip\":\"%s\", \"method\": \"%s\", \"path\": \"%v\", \"error\": \"%s\"}\n",
+	return fmt.Sprintf("{\"timestamp\":\"%v\", \"status_code\": \"%d\", \"latency\": \"%v\", \"latency_raw\": \"%d\", \"request_size\": \"%s\", \"request_size_raw\": \"%d\", \"response_size\": \"%s\", \"response_size_raw\": \"%d\", \"client_ip\":\"%s\", \"method\": \"%s\", \"path\": \"%v\", \"error\": \"%s\"}\n",
 		param.TimeStamp.Format(RFC3339Millis),
 		param.StatusCode,
 		param.Latency,
 		param.Latency,
+		humanize.Bytes(uint64(param.Request.ContentLength)),
+		param.Request.ContentLength,
 		humanize.Bytes(uint64(param.BodySize)),
 		param.BodySize,
 		param.ClientIP,

@@ -18,7 +18,6 @@ import (
 func StartServer(port string) {
 	r := gin.New()
 	r.Use(logger.NewGinLogger(), gin.Recovery())
-	//pprof.Register(r, "debug/pprof")
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	v1 := r.Group("/api/v1")

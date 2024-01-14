@@ -29,7 +29,6 @@ func init() {
 }
 
 type Encoder struct {
-	lsbsToUse                         byte
 	minChunkSize, chunkSizeMultiplier int
 	currentByte, currentPixel         int
 
@@ -43,7 +42,6 @@ func NewImageEncoder(image *image.RGBA, iConfig config.ImageEncodeConfig) *Encod
 	enc := &Encoder{
 		image:               image,
 		config:              iConfig,
-		lsbsToUse:           iConfig.LSBsToUse,
 		minChunkSize:        int(iConfig.LSBsToUse) * int(channelsToWrite),
 		chunkSizeMultiplier: config.DefaultChunkSizeMultiplier,
 	}
@@ -58,6 +56,7 @@ func (ie *Encoder) Encode(dataReader io.Reader, output io.Writer) error {
 	return ie.encodeRawImage(output)
 }
 
+// Cannot be called twice, or it may leave a pixel half empty
 func (ie *Encoder) EncodeFiles(files []model.InputFile, output io.Writer) error {
 	dataToEncode, err := ie.setupDataReader(files)
 	if err != nil {
@@ -69,10 +68,9 @@ func (ie *Encoder) EncodeFiles(files []model.InputFile, output io.Writer) error 
 }
 
 func (ie *Encoder) encodeLSBsToImage() {
-	packedLSBsToUse := ie.lsbsToUse - 1 // Save LSBs to use as value 0-7 so it fits in 3 bits (one pixel)
+	packedLSBsToUse := ie.config.LSBsToUse - 1 // Save LSBs to use as value 0-7 so it fits in 3 bits (one pixel)
 	LSBsBitReader := bits.NewBitReader([]byte{packedLSBsToUse})
 
-	LSBsToUse := ie.lsbsToUse
 	for p := 3; p < len(ie.image.Pix); p += 4 {
 		if ie.image.Pix[p] == 255 {
 			ie.currentPixel = p / 4
@@ -81,7 +79,6 @@ func (ie *Encoder) encodeLSBsToImage() {
 	}
 
 	ie.fillPixelLSBs(ie.currentPixel, LSBsBitReader, 1)
-	ie.lsbsToUse = LSBsToUse
 	ie.currentPixel++
 }
 
@@ -102,17 +99,21 @@ func (ie *Encoder) setupDataReader(filesToHide []model.InputFile) (io.Reader, er
 
 	dataReaders = append(dataReaders, bytes.NewReader(intToBitArray(len(filesToHide))))
 
-	var requiredBitsForEncoding int64
+	// encoding requires 3 bits for the LSBs setting and 64 (8 bytes) for the number of files encoded aside from,
+	// aside from the length of the encoded data
+	requiredBitsForEncoding := int64(3 + 64)
 	for _, fileToHide := range filesToHide {
 		dataReaders = append(dataReaders,
 			bytes.NewReader(intToBitArray(len(fileToHide.Name))),
 			bytes.NewReader([]byte(fileToHide.Name)),
 			bytes.NewReader(intToBitArray(int(fileToHide.Size))),
 			fileToHide.Content)
+
+		// length of file name (8 bytes) + file name + length of file (8 bytes) + file contents
 		requiredBitsForEncoding += (8 + int64(len([]byte(fileToHide.Name))) + 8 + fileToHide.Size) * 8
 	}
 
-	if uint64(requiredBitsForEncoding) > <-availablePixelChan*uint64(channelsToWrite) {
+	if uint64(requiredBitsForEncoding) > <-availablePixelChan*uint64(channelsToWrite)*uint64(ie.config.LSBsToUse) {
 		return nil, ErrImageNotBigEnough
 	}
 
@@ -135,7 +136,7 @@ func (ie *Encoder) encodeDataToRawImage(dataReader io.Reader) {
 		//	defer wg.Done()
 		br := bits.NewBitReader(chunkBytes)
 		for ; br.BytesLeftToRead() > 0; ie.currentPixel++ {
-			ie.fillPixelLSBs(ie.currentPixel, br, ie.lsbsToUse)
+			ie.fillPixelLSBs(ie.currentPixel, br, ie.config.LSBsToUse)
 		}
 		//}(ie.currentPixel, chunkBytes)
 
