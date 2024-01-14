@@ -67,7 +67,7 @@ func testEncode(t *testing.T, randomizePixelOpaqueness bool) {
 			py := currentPixel / outputImage.Bounds().Dx()
 			pixelOffset := outputImage.PixOffset(px, py)
 			pixel := outputImage.Pix[pixelOffset : pixelOffset+4]
-			for channelIdx := byte(0); channelIdx < channelsToWrite; channelIdx++ {
+			for channelIdx := byte(0); channelIdx < channelsToWrite && testBitReader.BytesLeftToRead() > 0; channelIdx++ {
 				if pixel[3] == 255 {
 					bitsToCheck := pixel[channelIdx] & (1<<LSBsToUse - 1)
 					expectedBits := testBitReader.ReadBits(uint(LSBsToUse))

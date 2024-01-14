@@ -30,7 +30,7 @@ func init() {
 
 type Encoder struct {
 	minChunkSize, chunkSizeMultiplier int
-	currentByte, currentPixel         int
+	currentByte, currentSubPixel      int
 
 	image  *image.RGBA
 	config config.ImageEncodeConfig
@@ -64,7 +64,6 @@ func (e *Encoder) Encode(dataReader io.Reader, output io.Writer) error {
 	return e.encodeRawImage(output)
 }
 
-// Cannot be called twice, or it may leave a pixel half empty
 func (e *Encoder) EncodeFiles(files []model.InputFile, output io.Writer) error {
 	e.stats = model.EncodeStats{}
 
@@ -84,7 +83,7 @@ func (e *Encoder) encodeLSBsToImage() error {
 	var opaquePixelFound bool
 	for p := 3; p < len(e.image.Pix); p += 4 {
 		if e.image.Pix[p] == 255 {
-			e.currentPixel = p / 4
+			e.currentSubPixel = p - 3
 			opaquePixelFound = true
 			break
 		}
@@ -94,8 +93,11 @@ func (e *Encoder) encodeLSBsToImage() error {
 		return ErrImageNotBigEnough
 	}
 
-	e.fillPixelLSBs(e.currentPixel, LSBsBitReader, 1)
-	e.currentPixel++
+	for i := 0; i < 3; i++ {
+		e.fillSubPixelLSBs(LSBsBitReader, 1)
+		e.currentSubPixel++
+	}
+	e.currentSubPixel++
 	return nil
 }
 
@@ -162,8 +164,16 @@ func (e *Encoder) encodeDataToRawImage(dataReader io.Reader) {
 		//go func(currentSubPixel int, bytesToWrite []byte) {
 		//	defer wg.Done()
 		br := bits.NewBitReader(chunkBytes)
-		for ; br.BytesLeftToRead() > 0; e.currentPixel++ {
-			e.fillPixelLSBs(e.currentPixel, br, e.config.LSBsToUse)
+		for br.BytesLeftToRead() > 0 && e.currentSubPixel < len(e.image.Pix) {
+			subPixelInCurrentPixel := e.currentSubPixel % 4
+			if subPixelInCurrentPixel == 0 && e.image.Pix[e.currentSubPixel+3] != 255 {
+				e.currentSubPixel += 4 // Skip to next pixel, since data encoded in non-opaque pixels cannot be recovered reliably
+			} else {
+				if subPixelInCurrentPixel != 3 {
+					e.fillSubPixelLSBs(br, e.config.LSBsToUse)
+				}
+				e.currentSubPixel++
+			}
 		}
 		//}(e.currentSubPixel, chunkBytes)
 
@@ -173,18 +183,9 @@ func (e *Encoder) encodeDataToRawImage(dataReader io.Reader) {
 	wg.Wait()
 }
 
-func (e *Encoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LSBsToUse byte) {
-	pixelChannelsToOverwrite := e.image.Pix[pixelToWriteTo*4 : pixelToWriteTo*4+4]
-	// Skip non-opaque pixels, since data encoded in them cannot be fully recovered reliably
-	if pixelChannelsToOverwrite[3] != 255 {
-		return
-	}
-
-	// Clear least significant bits to use, and then add the new bits. Iterate backwards since encoding order is green, blue, red, but we need
-	// the decoded order to be red, blue, green
-	for channel := byte(0); channel < channelsToWrite; channel++ {
-		pixelChannelsToOverwrite[channel] = ((pixelChannelsToOverwrite[channel] >> LSBsToUse) << LSBsToUse) + br.ReadBits(uint(LSBsToUse))
-	}
+func (e *Encoder) fillSubPixelLSBs(br *bits.BitReader, LSBsToUse byte) {
+	// Clear least significant bits to use, and then add the new bits
+	e.image.Pix[e.currentSubPixel] = ((e.image.Pix[e.currentSubPixel] >> LSBsToUse) << LSBsToUse) + br.ReadBits(uint(LSBsToUse))
 }
 
 func (e *Encoder) encodeRawImage(outputWriter io.Writer) error {
