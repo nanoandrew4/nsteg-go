@@ -1,4 +1,4 @@
-package logger
+package logging
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	RFC3339Millis = "2006-01-02T15:04:05.000Z07:00"
+	rfc3339Millis = "2006-01-02T15:04:05.000Z07:00"
 )
 
 func NewGinLogger() gin.HandlerFunc {
@@ -22,7 +22,7 @@ func logFormatter(param gin.LogFormatterParams) string {
 
 	if param.ErrorMessage == "" {
 		return fmt.Sprintf("{\"timestamp\":\"%v\", \"status_code\": \"%d\", \"latency\": \"%v\", \"latency_raw\": \"%d\", \"request_size\": \"%s\", \"request_size_raw\": \"%d\", \"response_size\": \"%s\", \"response_size_raw\": \"%d\", \"client_ip\":\"%s\", \"method\": \"%s\", \"path\": \"%v\"}\n",
-			param.TimeStamp.Format(RFC3339Millis),
+			param.TimeStamp.Format(rfc3339Millis),
 			param.StatusCode,
 			param.Latency,
 			param.Latency,
@@ -38,7 +38,7 @@ func logFormatter(param gin.LogFormatterParams) string {
 
 	// TODO: validate that JSON produced is valid with marshal/unmarshal test
 	return fmt.Sprintf("{\"timestamp\":\"%v\", \"status_code\": \"%d\", \"latency\": \"%v\", \"latency_raw\": \"%d\", \"request_size\": \"%s\", \"request_size_raw\": \"%d\", \"response_size\": \"%s\", \"response_size_raw\": \"%d\", \"client_ip\":\"%s\", \"method\": \"%s\", \"path\": \"%v\", \"error\": \"%s\"}\n",
-		param.TimeStamp.Format(RFC3339Millis),
+		param.TimeStamp.Format(rfc3339Millis),
 		param.StatusCode,
 		param.Latency,
 		param.Latency,

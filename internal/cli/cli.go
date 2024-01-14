@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"image"
 	"image/draw"
 	"nsteg/pkg/config"
@@ -15,7 +16,10 @@ func EncodeImageWithFiles(imageSourcePath, outputPath string, fileNames []string
 		return err
 	}
 
-	iEncoder := nstegImage.NewImageEncoder(srcImage, config)
+	iEncoder, err := nstegImage.NewImageEncoder(srcImage, config)
+	if err != nil {
+		return err
+	}
 
 	var filesToHide []model.InputFile
 	for _, fileName := range fileNames {
@@ -41,7 +45,15 @@ func EncodeImageWithFiles(imageSourcePath, outputPath string, fileNames []string
 	}
 
 	defer outputFile.Close()
-	return iEncoder.EncodeFiles(filesToHide, outputFile)
+	err = iEncoder.EncodeFiles(filesToHide, outputFile)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Encoder setup time: %s\n", iEncoder.Stats().Setup)
+	fmt.Printf("Data encode time: %s\n", iEncoder.Stats().DataEncoding)
+	fmt.Printf("Output image encode time: %s\n", iEncoder.Stats().OutputImageEncoding)
+	return nil
 }
 
 func DecodeFilesFromImage(encodedMediaFile string) error {
@@ -50,7 +62,10 @@ func DecodeFilesFromImage(encodedMediaFile string) error {
 		return err
 	}
 
-	decoder := nstegImage.NewImageDecoder(srcImage)
+	decoder, err := nstegImage.NewImageDecoder(srcImage)
+	if err != nil {
+		return err
+	}
 
 	decodedFiles, err := decoder.DecodeFiles()
 	if err != nil {

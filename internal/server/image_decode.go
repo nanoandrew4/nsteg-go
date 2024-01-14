@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"github.com/gin-gonic/gin"
 	"image"
-	"io"
 	"net/http"
 	"nsteg/api"
+	"nsteg/internal/logging"
 	nstegImage "nsteg/pkg/image"
 )
 
@@ -29,28 +29,47 @@ var (
 func DecodeImageHandler(ctx *gin.Context) {
 	var requestBody api.DecodeImageRequest
 
+	logger := logging.BuildLoggerFromCtx(ctx)
+	logger.Debug("Processing image decode request")
+
 	if err := ctx.ShouldBindJSON(&requestBody); err != nil {
+		logger.WithError(err).Error("Error decoding request body")
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, errRequestBodyDecode)
 		return
 	}
 
-	rawImageToDecode, _, err := image.Decode(io.NopCloser(bytes.NewReader(requestBody.ImageToDecode)))
+	rawImageToDecode, _, err := image.Decode(bytes.NewReader(requestBody.ImageToDecode))
 	if err != nil {
+		logger.WithError(err).Error("Error decoding request image")
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, errInvalidImage)
 		return
 	}
 
 	rgbaImageToDecode, castOk := rawImageToDecode.(*image.RGBA)
 	if !castOk {
+		logger.Error("Supplied image was not RGBA, casting failed")
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, errErrorConvertingRawImage)
 		return
 	}
 
-	imageDecoder := nstegImage.NewImageDecoder(rgbaImageToDecode)
-	decodedFiles, err := imageDecoder.DecodeFiles()
+	imageDecoder, err := nstegImage.NewImageDecoder(rgbaImageToDecode)
 	if err != nil {
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, errDecode)
+		handleDecodeError(ctx, logger, err)
+		return
 	}
 
+	decodedFiles, err := imageDecoder.DecodeFiles()
+	if err != nil {
+		handleDecodeError(ctx, logger, err)
+		return
+	}
+
+	logger.With("stats", toHumanizedDecodeStats(imageDecoder.Stats())).Info("Image decoding was successful")
+
 	ctx.JSON(http.StatusOK, api.DecodeImageResponse{DecodedFiles: decodedFiles})
+}
+
+func handleDecodeError(ctx *gin.Context, logger *logging.Logger, err error) {
+	logger.WithError(err).Error("Error decoding data from image")
+	ctx.AbortWithStatusJSON(http.StatusInternalServerError, errDecode)
 }

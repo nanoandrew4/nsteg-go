@@ -4,6 +4,7 @@ import (
 	"errors"
 	"image"
 	"nsteg/pkg/model"
+	"time"
 )
 
 const (
@@ -16,22 +17,38 @@ var (
 )
 
 type Decoder struct {
-	LSBsToUse, currentPixelBit byte
-	currentPixel               int
+	LSBsToUse, bitsLeftToReadInSubPixel byte
+
+	// currentSubPixel Represents the pixel/channel the decoder is on. A value of 3, according to the RGBA order of
+	// image.RGBA, would represent the blue channel of the first pixel
+	currentSubPixel int
 
 	image *image.RGBA
+	stats model.DecodeStats
 }
 
-func NewImageDecoder(image *image.RGBA) *Decoder {
+func NewImageDecoder(image *image.RGBA) (*Decoder, error) {
 	d := &Decoder{
 		image: image,
 	}
 
-	d.decodeLSBsToUse()
-	return d
+	err := d.decodeLSBsToUse()
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func (d *Decoder) Stats() model.DecodeStats {
+	return d.stats
 }
 
 func (d *Decoder) DecodeFiles() ([]model.OutputFile, error) {
+	decodeStart := time.Now()
+	defer func() {
+		d.stats.DataDecoding = time.Since(decodeStart)
+	}()
+
 	var decodedFiles []model.OutputFile
 
 	numOfFilesToDecode, err := d.readUInt()
@@ -65,25 +82,26 @@ func (d *Decoder) DecodeFiles() ([]model.OutputFile, error) {
 	return decodedFiles, nil
 }
 
-func (d *Decoder) incrementCurrentPixel() {
-	d.currentPixel++
-	if d.currentPixel%4 == 3 { // Skip alpha channel
-		d.currentPixel++
-	}
-}
-
-func (d *Decoder) decodeLSBsToUse() {
+func (d *Decoder) decodeLSBsToUse() error {
 	// Find first opaque pixel, which will contain the LSBs
+	var opaquePixelFound bool
 	for p := 3; p < len(d.image.Pix); p += 4 {
 		if d.image.Pix[p] == 255 {
-			d.currentPixel = p - 3
+			d.currentSubPixel = p - 3
+			opaquePixelFound = true
 			break
 		}
 	}
-	firstPixel := d.image.Pix[d.currentPixel : d.currentPixel+3]
+
+	if !opaquePixelFound {
+		return ErrDecodeFileBounds
+	}
+
+	firstPixel := d.image.Pix[d.currentSubPixel : d.currentSubPixel+3]
 	// Value will be 0-7 (3 bit value), we add 1 to restore the original 1-8 value
 	d.LSBsToUse = (firstPixel[0] & 1) + (firstPixel[1]&1)<<1 + (firstPixel[2]&1)<<2 + 1
-	d.currentPixel += 4
+	d.currentSubPixel += 4
+	return nil
 }
 
 func (d *Decoder) readUInt() (uint, error) {
@@ -95,43 +113,54 @@ func (d *Decoder) readUInt() (uint, error) {
 }
 
 func (d *Decoder) readBytes(numOfBytesToRead uint) (b []byte, retErr error) {
+	// Images not encoded with nsteg will cause random data to be read, which will likely lead to an attempt to decode a
+	// random number of bytes. We set a hard limit to catch these cases and prevent an OOM panic from crashing the
+	// program. Although some sort of identifying byte sequence could be encoded to mitigate this issue, it would
+	// not prevent it entirely, and would defeat the purpose of steganography, by making it trivial to identify if an
+	// image is holding secret data or not
 	if numOfBytesToRead > MaxBytesAllocatedAtOnce {
 		return nil, ErrMaxAllocExceeded
 	}
+
+	d.advanceToNextOpaquePixelIfOnNonOpaquePixel()
 
 	readBytes := make([]byte, numOfBytesToRead)
 	var currByte, currBit byte
 	var currByteIdx uint
 	for currByteIdx < numOfBytesToRead {
-		if d.currentPixel >= len(d.image.Pix) {
-			return nil, ErrDecodeFileBounds
-		}
 
-		var currentPixelAlpha = d.image.Pix[(d.currentPixel/4)*4+3]
-		if currentPixelAlpha != 255 {
-			d.currentPixel += 4
-			continue
-		}
-
-		if d.currentPixelBit > 0 {
-			bitsLeftToReadInPixel := d.LSBsToUse - d.currentPixelBit
-			currByte += (d.image.Pix[d.currentPixel] & ((1<<bitsLeftToReadInPixel - 1) << (d.currentPixelBit))) >> d.currentPixelBit
-			currBit += bitsLeftToReadInPixel
-			d.currentPixelBit = 0
-			d.incrementCurrentPixel()
-			if d.currentPixel >= len(d.image.Pix) {
-				return nil, ErrDecodeFileBounds
+		// This path is only traversed by LSB settings of 3, 5, 6 and 7, since these values can cause a pixel to fill a
+		// byte, and have some bits leftover to read. As an example, if LSBs == 3, a pixel will contain 9 bits of
+		// encoded data, which will fill a byte, and one bit will be left over, this path reads that leftover bit
+		// into the current byte
+		if d.bitsLeftToReadInSubPixel > 0 {
+			bitsPreviouslyReadFromPixel := d.LSBsToUse - d.bitsLeftToReadInSubPixel
+			currByte += (d.image.Pix[d.currentSubPixel] & ((1<<d.bitsLeftToReadInSubPixel - 1) << (bitsPreviouslyReadFromPixel))) >> bitsPreviouslyReadFromPixel
+			currBit += d.bitsLeftToReadInSubPixel
+			d.bitsLeftToReadInSubPixel = 0
+			err := d.advanceToNextOpaqueSubpixel()
+			if err != nil {
+				return nil, err
 			}
 		}
 
+		// This path is traversed by all LSB settings
 		if currBit+d.LSBsToUse <= 8 {
-			currByte += (d.image.Pix[d.currentPixel] & (1<<d.LSBsToUse - 1)) << currBit
+			currByte += (d.image.Pix[d.currentSubPixel] & (1<<d.LSBsToUse - 1)) << currBit
 			currBit += d.LSBsToUse
-			d.incrementCurrentPixel()
-		} else {
-			if bitsLeftToRead := 8 - currBit; bitsLeftToRead > 0 {
-				currByte += (d.image.Pix[d.currentPixel] & (1<<bitsLeftToRead - 1)) << currBit
-				d.currentPixelBit = bitsLeftToRead
+			err := d.advanceToNextOpaqueSubpixel()
+			if err != nil {
+				return nil, err
+			}
+		} else { // This path is traversed by all LSB settings
+
+			// This path is only traversed by LSB settings of 3, 5, 6 and 7. As explained above, these LSB settings
+			// cause pixels to only be partially read to fill a byte. Here we finish filling the current byte with
+			// however bits its missing from the current pixel. The remaining bits will be read on the next iteration
+			// in the other if statement targeting these LSB settings
+			if bitsReadFromPixel := 8 - currBit; bitsReadFromPixel > 0 {
+				currByte += (d.image.Pix[d.currentSubPixel] & (1<<bitsReadFromPixel - 1)) << currBit
+				d.bitsLeftToReadInSubPixel = d.LSBsToUse - bitsReadFromPixel
 			}
 
 			readBytes[currByteIdx] = currByte
@@ -142,6 +171,25 @@ func (d *Decoder) readBytes(numOfBytesToRead uint) (b []byte, retErr error) {
 	}
 
 	return readBytes, nil
+}
+
+func (d *Decoder) advanceToNextOpaqueSubpixel() error {
+	d.currentSubPixel++
+	if d.currentSubPixel%4 == 3 { // Skip alpha channel
+		d.currentSubPixel++
+		d.advanceToNextOpaquePixelIfOnNonOpaquePixel()
+	}
+
+	if d.currentSubPixel >= len(d.image.Pix) {
+		return ErrDecodeFileBounds
+	}
+	return nil
+}
+
+func (d *Decoder) advanceToNextOpaquePixelIfOnNonOpaquePixel() {
+	for d.image.Pix[(d.currentSubPixel/4)*4+3] != 255 {
+		d.currentSubPixel += 4
+	}
 }
 
 func bytesToInt(bytes []byte) uint {

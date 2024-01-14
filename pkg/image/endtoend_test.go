@@ -27,16 +27,26 @@ func testEncodeDecode(t *testing.T, randomizePixelOpaqueness bool) {
 
 		testFiles := generateFilesToEncode((opaquePixels * int(LSBsToUse) * 3) / 8)
 		originalHashes := calculateInputFileHashes(testFiles)
-		encoder := NewImageEncoder(imageToEncode, config.ImageEncodeConfig{
+		encoder, err := NewImageEncoder(imageToEncode, config.ImageEncodeConfig{
 			LSBsToUse:           LSBsToUse,
 			PngCompressionLevel: png.NoCompression,
 		})
-		err := encoder.EncodeFiles(convertTestInputToStandardInput(testFiles), io.Discard)
+		if err != nil {
+			t.Errorf("Error creating image encoder")
+			continue
+		}
+
+		err = encoder.EncodeFiles(convertTestInputToStandardInput(testFiles), io.Discard)
 		if err != nil {
 			t.Fatalf("Error encoding image: %s", err)
 		}
 
-		decoder := NewImageDecoder(encoder.image)
+		decoder, err := NewImageDecoder(encoder.image)
+		if err != nil {
+			t.Errorf("Error creating image decoder")
+			continue
+		}
+
 		decodedFiles, err := decoder.DecodeFiles()
 		if err != nil {
 			t.Errorf("Error decoding image with %d LSBs: %s", LSBsToUse, err)

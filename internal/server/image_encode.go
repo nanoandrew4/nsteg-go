@@ -11,9 +11,14 @@ import (
 	"net/http"
 	"nsteg/api"
 	"nsteg/api/nsteg/EncodeImage"
+	"nsteg/internal/logging"
 	"nsteg/pkg/config"
 	nstegImage "nsteg/pkg/image"
 	"nsteg/pkg/model"
+)
+
+var (
+	errEncode = api.Error{Code: "encode_error", Error: "An error occurred while encoding the image"}
 )
 
 // EncodeImageHandler godoc
@@ -31,13 +36,18 @@ import (
 func EncodeImageHandler(ctx *gin.Context) {
 	var requestBody api.EncodeImageRequest
 
+	logger := logging.BuildLoggerFromCtx(ctx)
+	logger.Debug("Processing image encode request")
+
 	if err := ctx.ShouldBindJSON(&requestBody); err != nil {
+		logger.WithError(err).Error("Error reading request body")
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, errRequestBodyDecode)
 		return
 	}
 
 	imageToEncode, _, err := image.Decode(bytes.NewReader(requestBody.ImageToEncode))
 	if err != nil {
+		logger.WithError(err).Error("Error decoding request image")
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, errInvalidImage)
 		return
 	}
@@ -46,10 +56,13 @@ func EncodeImageHandler(ctx *gin.Context) {
 	draw.Draw(rgbaImg, rgbaImg.Bounds(), imageToEncode, rgbaImg.Bounds().Min, draw.Src)
 	imageToEncode = nil
 
-	imageEncoder := nstegImage.NewImageEncoder(rgbaImg, config.ImageEncodeConfig{
+	imageEncoder, err := nstegImage.NewImageEncoder(rgbaImg, config.ImageEncodeConfig{
 		LSBsToUse:           requestBody.LsbsToUse,
 		PngCompressionLevel: png.DefaultCompression, // to reduce bandwidth costs since lower compression results in huge images
 	})
+	if err != nil {
+		handleEncodeError(ctx, logger, err)
+	}
 
 	var filesToHide []model.InputFile
 	for _, reqFileToHide := range requestBody.FilesToHide {
@@ -63,9 +76,11 @@ func EncodeImageHandler(ctx *gin.Context) {
 	encodedImageBuffer := bytes.NewBuffer(make([]byte, 0, len(requestBody.ImageToEncode))) // pre allocate with size of original, since it should be similar
 	err = imageEncoder.EncodeFiles(filesToHide, encodedImageBuffer)
 	if err != nil {
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, api.Error{Code: "encode_error", Error: "An error occurred while encoding the image"})
+		handleEncodeError(ctx, logger, err)
 		return
 	}
+
+	logger.With("stats", toHumanizedEncodeStats(imageEncoder.Stats())).Info("Image encoding was successful")
 
 	ctx.JSON(http.StatusOK, api.EncodeImageResponse{EncodedImage: encodedImageBuffer.Bytes()})
 }
@@ -89,10 +104,15 @@ func handleImageEncodeRequest(w http.ResponseWriter, r *http.Request) {
 	draw.Draw(rgbaImg, rgbaImg.Bounds(), imageToEncode, rgbaImg.Bounds().Min, draw.Src)
 	imageToEncode = nil
 
-	imageEncoder := nstegImage.NewImageEncoder(rgbaImg, config.ImageEncodeConfig{
+	imageEncoder, err := nstegImage.NewImageEncoder(rgbaImg, config.ImageEncodeConfig{
 		LSBsToUse:           encodeImageRequest.LsbsToUse(),
 		PngCompressionLevel: png.BestCompression, // to reduce bandwidth costs since lower compression results in huge images
 	})
+
+	if err != nil {
+		http.Error(w, "error encoding image", http.StatusInternalServerError)
+		return
+	}
 
 	var filesToHide []model.InputFile
 	for i := 0; i < encodeImageRequest.FilesToHideLength(); i++ {
@@ -132,4 +152,9 @@ func handleImageEncodeRequest(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
+}
+
+func handleEncodeError(ctx *gin.Context, logger *logging.Logger, err error) {
+	logger.WithError(err).Error("Error encoding data to image")
+	ctx.AbortWithStatusJSON(http.StatusInternalServerError, errEncode)
 }

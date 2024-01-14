@@ -10,8 +10,8 @@ import (
 	"nsteg/internal/bits"
 	"nsteg/pkg/config"
 	"nsteg/pkg/model"
-	"os"
 	"sync"
+	"time"
 )
 
 const (
@@ -34,9 +34,10 @@ type Encoder struct {
 
 	image  *image.RGBA
 	config config.ImageEncodeConfig
+	stats  model.EncodeStats
 }
 
-func NewImageEncoder(image *image.RGBA, iConfig config.ImageEncodeConfig) *Encoder {
+func NewImageEncoder(image *image.RGBA, iConfig config.ImageEncodeConfig) (*Encoder, error) {
 	iConfig.PopulateUnsetConfigVars()
 
 	enc := &Encoder{
@@ -46,51 +47,72 @@ func NewImageEncoder(image *image.RGBA, iConfig config.ImageEncodeConfig) *Encod
 		chunkSizeMultiplier: config.DefaultChunkSizeMultiplier,
 	}
 
-	enc.encodeLSBsToImage()
-	return enc
+	err := enc.encodeLSBsToImage()
+	if err != nil {
+		return nil, err
+	}
+	return enc, nil
 }
 
-func (ie *Encoder) Encode(dataReader io.Reader, output io.Writer) error {
-	ie.encodeDataToRawImage(dataReader)
+func (e *Encoder) Stats() model.EncodeStats {
+	return e.stats
+}
 
-	return ie.encodeRawImage(output)
+func (e *Encoder) Encode(dataReader io.Reader, output io.Writer) error {
+	e.encodeDataToRawImage(dataReader)
+
+	return e.encodeRawImage(output)
 }
 
 // Cannot be called twice, or it may leave a pixel half empty
-func (ie *Encoder) EncodeFiles(files []model.InputFile, output io.Writer) error {
-	dataToEncode, err := ie.setupDataReader(files)
+func (e *Encoder) EncodeFiles(files []model.InputFile, output io.Writer) error {
+	e.stats = model.EncodeStats{}
+
+	dataToEncode, err := e.setupDataReader(files)
 	if err != nil {
 		return err
 	}
 
-	ie.encodeDataToRawImage(dataToEncode)
-	return ie.encodeRawImage(output)
+	e.encodeDataToRawImage(dataToEncode)
+	return e.encodeRawImage(output)
 }
 
-func (ie *Encoder) encodeLSBsToImage() {
-	packedLSBsToUse := ie.config.LSBsToUse - 1 // Save LSBs to use as value 0-7 so it fits in 3 bits (one pixel)
+func (e *Encoder) encodeLSBsToImage() error {
+	packedLSBsToUse := e.config.LSBsToUse - 1 // Save LSBs to use as value 0-7 so it fits in 3 bits (one pixel)
 	LSBsBitReader := bits.NewBitReader([]byte{packedLSBsToUse})
 
-	for p := 3; p < len(ie.image.Pix); p += 4 {
-		if ie.image.Pix[p] == 255 {
-			ie.currentPixel = p / 4
+	var opaquePixelFound bool
+	for p := 3; p < len(e.image.Pix); p += 4 {
+		if e.image.Pix[p] == 255 {
+			e.currentPixel = p / 4
+			opaquePixelFound = true
 			break
 		}
 	}
 
-	ie.fillPixelLSBs(ie.currentPixel, LSBsBitReader, 1)
-	ie.currentPixel++
+	if !opaquePixelFound {
+		return ErrImageNotBigEnough
+	}
+
+	e.fillPixelLSBs(e.currentPixel, LSBsBitReader, 1)
+	e.currentPixel++
+	return nil
 }
 
-func (ie *Encoder) setupDataReader(filesToHide []model.InputFile) (io.Reader, error) {
+func (e *Encoder) setupDataReader(filesToHide []model.InputFile) (io.Reader, error) {
+	setupStart := time.Now()
+	defer func() {
+		e.stats.Setup = time.Since(setupStart)
+	}()
+
 	var dataReaders []io.Reader
 
 	// Scan ahead to count opaque pixels
 	availablePixelChan := make(chan uint64)
 	go func() {
 		var availablePixels uint64
-		for p := 3; p < len(ie.image.Pix); p += 4 {
-			if ie.image.Pix[p] == 255 {
+		for p := 3; p < len(e.image.Pix); p += 4 {
+			if e.image.Pix[p] == 255 {
 				availablePixels++
 			}
 		}
@@ -113,15 +135,20 @@ func (ie *Encoder) setupDataReader(filesToHide []model.InputFile) (io.Reader, er
 		requiredBitsForEncoding += (8 + int64(len([]byte(fileToHide.Name))) + 8 + fileToHide.Size) * 8
 	}
 
-	if uint64(requiredBitsForEncoding) > <-availablePixelChan*uint64(channelsToWrite)*uint64(ie.config.LSBsToUse) {
+	if uint64(requiredBitsForEncoding) > <-availablePixelChan*uint64(channelsToWrite)*uint64(e.config.LSBsToUse) {
 		return nil, ErrImageNotBigEnough
 	}
 
 	return io.MultiReader(dataReaders...), nil
 }
 
-func (ie *Encoder) encodeDataToRawImage(dataReader io.Reader) {
-	chunkSize := ie.minChunkSize * ie.chunkSizeMultiplier
+func (e *Encoder) encodeDataToRawImage(dataReader io.Reader) {
+	encodeStart := time.Now()
+	defer func() {
+		e.stats.DataEncoding = time.Since(encodeStart)
+	}()
+
+	chunkSize := e.minChunkSize * e.chunkSizeMultiplier
 
 	bytesRead := chunkSize
 	var eofErr error
@@ -132,22 +159,22 @@ func (ie *Encoder) encodeDataToRawImage(dataReader io.Reader) {
 		chunkBytes = chunkBytes[:bytesRead]
 
 		//wg.Add(1)
-		//go func(currentPixel int, bytesToWrite []byte) {
+		//go func(currentSubPixel int, bytesToWrite []byte) {
 		//	defer wg.Done()
 		br := bits.NewBitReader(chunkBytes)
-		for ; br.BytesLeftToRead() > 0; ie.currentPixel++ {
-			ie.fillPixelLSBs(ie.currentPixel, br, ie.config.LSBsToUse)
+		for ; br.BytesLeftToRead() > 0; e.currentPixel++ {
+			e.fillPixelLSBs(e.currentPixel, br, e.config.LSBsToUse)
 		}
-		//}(ie.currentPixel, chunkBytes)
+		//}(e.currentSubPixel, chunkBytes)
 
-		ie.currentByte += chunkSize
-		//ie.currentPixel += (chunkSize / int(channelsToWrite) * 8) / int(ie.lsbsToUse)
+		e.currentByte += chunkSize
+		//e.currentSubPixel += (chunkSize / int(channelsToWrite) * 8) / int(e.lsbsToUse)
 	}
 	wg.Wait()
 }
 
-func (ie *Encoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LSBsToUse byte) {
-	pixelChannelsToOverwrite := ie.image.Pix[pixelToWriteTo*4 : pixelToWriteTo*4+4]
+func (e *Encoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LSBsToUse byte) {
+	pixelChannelsToOverwrite := e.image.Pix[pixelToWriteTo*4 : pixelToWriteTo*4+4]
 	// Skip non-opaque pixels, since data encoded in them cannot be fully recovered reliably
 	if pixelChannelsToOverwrite[3] != 255 {
 		return
@@ -160,23 +187,13 @@ func (ie *Encoder) fillPixelLSBs(pixelToWriteTo int, br *bits.BitReader, LSBsToU
 	}
 }
 
-func (ie *Encoder) encodeRawImage(outputWriter io.Writer) error {
-	enc := png.Encoder{CompressionLevel: ie.config.PngCompressionLevel}
-	return enc.Encode(outputWriter, ie.image)
-}
-
-func (ie *Encoder) saveAsPng(outputPath string, config config.ImageEncodeConfig) error {
-	f, err := os.Create(outputPath)
-	if err != nil {
-		return err
-	}
-
-	enc := png.Encoder{CompressionLevel: config.PngCompressionLevel}
-	err = enc.Encode(f, ie.image)
-	if err != nil {
-		return err
-	}
-	return f.Close()
+func (e *Encoder) encodeRawImage(outputWriter io.Writer) error {
+	imageEncodeStart := time.Now()
+	defer func() {
+		e.stats.OutputImageEncoding = time.Since(imageEncodeStart)
+	}()
+	enc := png.Encoder{CompressionLevel: e.config.PngCompressionLevel}
+	return enc.Encode(outputWriter, e.image)
 }
 
 func intToBitArray(i int) []byte {

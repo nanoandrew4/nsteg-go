@@ -37,7 +37,10 @@ func BenchmarkEncodeSpeedOnOpaqueImage(b *testing.B) {
 							LSBsToUse:           LSBsToUse,
 							PngCompressionLevel: compressionLevel,
 						}
-						testImageEncoder := NewImageEncoder(img, iConfig)
+						testImageEncoder, err := NewImageEncoder(img, iConfig)
+						if err != nil {
+							b.Fatalf("Error creating image encoder for benchmark")
+						}
 						bytesReader := bytes.NewReader(bytesToEncode)
 						b.StartTimer()
 						_ = testImageEncoder.Encode(bytesReader, io.Discard)

@@ -8,8 +8,16 @@ import (
 	"testing"
 )
 
-func TestEncode(t *testing.T) {
-	img, opaquePixels := generateImage(ImageSize, ImageSize, true)
+func TestEncodeWithOpaqueImage(t *testing.T) {
+	testEncode(t, false)
+}
+
+func TestEncodeWithPartiallyOpaqueImage(t *testing.T) {
+	testEncode(t, true)
+}
+
+func testEncode(t *testing.T, randomizePixelOpaqueness bool) {
+	img, opaquePixels := generateImage(ImageSize, ImageSize, randomizePixelOpaqueness)
 	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
 		testFiles := generateFilesToEncode((opaquePixels * int(LSBsToUse) * 3) / 8)
 
@@ -24,12 +32,15 @@ func TestEncode(t *testing.T) {
 			expectedEncodedBytes = append(expectedEncodedBytes, fileContent...)
 		}
 
-		encoder := NewImageEncoder(img, config.ImageEncodeConfig{
+		encoder, err := NewImageEncoder(img, config.ImageEncodeConfig{
 			LSBsToUse:           LSBsToUse,
 			PngCompressionLevel: png.NoCompression,
 		})
+		if err != nil {
+			t.Fatalf("Error creating image encoder")
+		}
 
-		err := encoder.EncodeFiles(convertTestInputToStandardInput(testFiles), io.Discard)
+		err = encoder.EncodeFiles(convertTestInputToStandardInput(testFiles), io.Discard)
 		if err != nil {
 			t.Fatalf("Error encoding files %s", err)
 		}
