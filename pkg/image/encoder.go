@@ -140,7 +140,8 @@ func (e *Encoder) setupDataReader(filesToHide []model.InputFile) (io.Reader, err
 		requiredBitsForEncoding += (8 + int64(len([]byte(fileToHide.Name))) + 8 + fileToHide.Size) * 8
 	}
 
-	if uint64(requiredBitsForEncoding) > <-availablePixelChan*uint64(channelsToWrite)*uint64(e.config.LSBsToUse) {
+	availableBitsInImage := <-availablePixelChan * uint64(channelsToWrite) * uint64(e.config.LSBsToUse)
+	if uint64(requiredBitsForEncoding) > availableBitsInImage {
 		return nil, ErrImageNotBigEnough
 	}
 

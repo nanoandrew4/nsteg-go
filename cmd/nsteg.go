@@ -93,17 +93,17 @@ func setupCPUProfilingAndReturnTeardown(cpuProfile string) (deferredTeardown fun
 	if err != nil {
 		log.Fatal(err)
 	}
-	config.StartCPUProfiler(cpuProfileFile)
+	cli.StartCPUProfiler(cpuProfileFile)
 
 	return func() {
-		config.StopCPUProfiler()
+		cli.StopCPUProfiler()
 		cpuProfileFile.Close()
 	}
 }
 
 func setupMemProfilingAndReturnTeardown(memProfileDir string) (deferredTeardown func()) {
-	config.StartMemoryProfiler(memProfileDir)
+	cli.StartMemoryProfiler(memProfileDir)
 	return func() {
-		config.StopMemoryProfiler()
+		cli.StopMemoryProfiler()
 	}
 }

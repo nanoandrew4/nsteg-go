@@ -43,6 +43,10 @@ func (d *Decoder) Stats() model.DecodeStats {
 	return d.stats
 }
 
+func (d *Decoder) Decode(numOfBytesToDecode int) ([]byte, error) {
+	return d.readBytes(uint(numOfBytesToDecode))
+}
+
 func (d *Decoder) DecodeFiles() ([]model.OutputFile, error) {
 	decodeStart := time.Now()
 	defer func() {

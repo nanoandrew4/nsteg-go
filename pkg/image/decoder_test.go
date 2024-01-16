@@ -1,35 +1,49 @@
 package image
 
 import (
-	"crypto/rand"
+	"bytes"
 	"fmt"
+	"nsteg/pkg/config"
 	"testing"
 )
 
-// TODO: rewrite
 func BenchmarkDecodeSpeed(b *testing.B) {
-	img, _ := generateImage(10000, 10000, false)
-	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
-		for _, bytesToRead := range []int{100000, 1000000, 10000000} {
-			numOfBytesToEncode := bytesToRead
-			b.Run(fmt.Sprintf("MBs=%f/LSBsToUse=%d", float64(bytesToRead)/1000000.0, LSBsToUse), func(b *testing.B) {
-				b.SetBytes(int64(numOfBytesToEncode))
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					b.StopTimer()
-					bytesToEncode := make([]byte, numOfBytesToEncode)
-					_, err := rand.Read(bytesToEncode)
-					if err != nil {
-						panic(err)
-					}
-					testImageDecoder := Decoder{
-						image:     img,
-						LSBsToUse: LSBsToUse,
-					}
-					b.StartTimer()
-					testImageDecoder.readBytes(uint(bytesToRead))
+	for _, randomizePixelOpaqueness := range []bool{false, true} {
+		b.Run(getOpaquenessLabel(randomizePixelOpaqueness), func(b *testing.B) {
+			img, opaquePixels := generateImage(benchImageSize, benchImageSize, randomizePixelOpaqueness)
+			for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
+				numOfBytesToEncode := calculateBytesThatFitInImage(opaquePixels, LSBsToUse)
+				bytesToEncode := generateRandomBytes(numOfBytesToEncode)
+				iConfig := config.ImageEncodeConfig{
+					LSBsToUse: LSBsToUse,
 				}
-			})
-		}
+				testImageEncoder, err := NewImageEncoder(img, iConfig)
+				if err != nil {
+					b.Fatalf("Error creating image encoder for benchmark")
+				}
+				err = testImageEncoder.Encode(bytes.NewReader(bytesToEncode))
+				if err != nil {
+					b.Fatalf("Error during image encoding: %s", err)
+				}
+
+				b.Run(fmt.Sprintf("LSBsToUse=%d", LSBsToUse), func(b *testing.B) {
+					var numOfDecodedBytes int
+					for i := 0; i < b.N; i++ {
+						b.StopTimer()
+						testImageDecoder := Decoder{
+							image:     img,
+							LSBsToUse: LSBsToUse,
+						}
+						numOfDecodedBytes += numOfBytesToEncode
+						b.StartTimer()
+						_, err = testImageDecoder.Decode(numOfBytesToEncode)
+						if err != nil {
+							b.Fatalf("Error during image decode: %s", err)
+						}
+					}
+					b.SetBytes(int64(numOfDecodedBytes))
+				})
+			}
+		})
 	}
 }

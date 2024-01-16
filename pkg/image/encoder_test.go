@@ -24,7 +24,7 @@ func TestMultiPassEncode(t *testing.T) {
 
 func encodeFiles(t *testing.T, LSBsToUse byte, randomizePixelOpaqueness bool) {
 	img, opaquePixels := generateImage(ImageSize, ImageSize, randomizePixelOpaqueness)
-	testFiles := generateFilesToEncode((opaquePixels * int(LSBsToUse) * 3) / 8)
+	testFiles := generateFilesToEncode(calculateBytesThatFitInImage(opaquePixels, LSBsToUse))
 
 	var expectedEncodedBytes []byte
 	expectedEncodedBytes = append(expectedEncodedBytes, intToBitArray(len(testFiles))...)
@@ -67,12 +67,7 @@ func testEncode(multiPass bool) testFunc {
 			encodesToPerform = rand.Intn(99) + 1
 		}
 		for i := 0; i < encodesToPerform; i++ {
-			bytesToEncode := make([]byte, calculateMaxPixelsInRGBAImage(opaquePixels, LSBsToUse)/encodesToPerform)
-			_, err = rand.Read(bytesToEncode)
-			if err != nil {
-				panic(err)
-			}
-
+			bytesToEncode := generateRandomBytes(calculateBytesThatFitInImage(opaquePixels, LSBsToUse) / encodesToPerform)
 			err = encoder.Encode(bytes.NewReader(bytesToEncode))
 			if err != nil {
 				t.Fatalf("Error encoding files %s", err)

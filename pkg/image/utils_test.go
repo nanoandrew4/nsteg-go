@@ -66,15 +66,16 @@ func randUint8() uint8 {
 	return uint8(rand.Intn(256))
 }
 
-func calculateMaxPixelsInRGBAImage(opaquePixels int, LSBsToUse byte) int {
+func calculateBytesThatFitInImage(opaquePixels int, LSBsToUse byte) int {
 	return ((opaquePixels - 1) * int(LSBsToUse) * 3) / 8
 }
 
-func generateFilesToEncode(availableBytes int) []testInputFile {
+func generateFilesToEncode(availableBytes int) (testFiles []testInputFile) {
 	var filesToEncode []testInputFile
 
-	var numOfBytesGenerated int
-	for i := 0; ; i++ {
+	var exit bool
+	var numOfBytesGenerated = 64 // 64 bits are needed to encode the number of files
+	for i := 0; !exit; i++ {
 		fileName := TestFilePrefix + strconv.Itoa(i)
 		bytesToUseForFile := rand.Intn(availableBytes - (8 + len(fileName) + 8))
 
@@ -82,22 +83,35 @@ func generateFilesToEncode(availableBytes int) []testInputFile {
 		// for the file size, plus however many bytes the file is made up of
 		bytesRequiredForNextFile := 8 + len(fileName) + 8 + bytesToUseForFile
 		if numOfBytesGenerated+bytesRequiredForNextFile > availableBytes {
-			return filesToEncode
-		}
-
-		generatedBytes := make([]byte, bytesToUseForFile)
-		_, err := rand.Read(generatedBytes)
-		if err != nil {
-			panic(err)
+			bytesToUseForFile = availableBytes - numOfBytesGenerated - (8 + len(fileName) + 8)
+			bytesRequiredForNextFile = 8 + len(fileName) + 8 + bytesToUseForFile
+			exit = true
 		}
 
 		filesToEncode = append(filesToEncode, testInputFile{
 			Name:    fileName,
-			Content: generatedBytes,
+			Content: generateRandomBytes(bytesToUseForFile),
 		})
 
 		numOfBytesGenerated += bytesRequiredForNextFile
 	}
 
 	return filesToEncode
+}
+
+func generateRandomBytes(numOfBytesToGenerate int) []byte {
+	generatedBytes := make([]byte, numOfBytesToGenerate)
+	_, err := rand.Read(generatedBytes)
+	if err != nil {
+		panic(err)
+	}
+	return generatedBytes
+}
+
+func getOpaquenessLabel(randomizeOpaqueness bool) string {
+	if randomizeOpaqueness {
+		return "non-opaque"
+	} else {
+		return "opaque"
+	}
 }

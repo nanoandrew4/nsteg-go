@@ -12,14 +12,14 @@ import (
 const TestFilePrefix = "testfile_"
 const ImageSize = 3000
 
-func TestEncodeDecode(t *testing.T) {
-	runImageTestsWithAllLSBsAndOpaquenessSettings(t, encodeDecode)
+func TestEncodeDecodeFiles(t *testing.T) {
+	runImageTestsWithAllLSBsAndOpaquenessSettings(t, encodeDecodeFiles)
 }
 
-func encodeDecode(t *testing.T, LSBsToUse byte, randomizePixelOpaqueness bool) {
+func encodeDecodeFiles(t *testing.T, LSBsToUse byte, randomizePixelOpaqueness bool) {
 	imageToEncode, opaquePixels := generateImage(ImageSize, ImageSize, randomizePixelOpaqueness)
 
-	testFiles := generateFilesToEncode((opaquePixels * int(LSBsToUse) * 3) / 8)
+	testFiles := generateFilesToEncode(calculateBytesThatFitInImage(opaquePixels, LSBsToUse))
 	originalHashes := calculateInputFileHashes(testFiles)
 	encoder, err := NewImageEncoder(imageToEncode, config.ImageEncodeConfig{
 		LSBsToUse:           LSBsToUse,
