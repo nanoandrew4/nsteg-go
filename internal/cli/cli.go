@@ -45,7 +45,11 @@ func EncodeImageWithFiles(imageSourcePath, outputPath string, fileNames []string
 	}
 
 	defer outputFile.Close()
-	err = iEncoder.EncodeFiles(filesToHide, outputFile)
+	err = iEncoder.EncodeFiles(filesToHide)
+	if err != nil {
+		return err
+	}
+	err = iEncoder.WriteEncodedPNG(outputFile)
 	if err != nil {
 		return err
 	}

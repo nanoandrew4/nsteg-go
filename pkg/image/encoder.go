@@ -29,8 +29,8 @@ func init() {
 }
 
 type Encoder struct {
-	minChunkSize, chunkSizeMultiplier int
-	currentByte, currentSubPixel      int
+	minChunkSize, chunkSizeMultiplier                int
+	currentByte, currentSubPixel, currentSubPixelBit int
 
 	image  *image.RGBA
 	config config.ImageEncodeConfig
@@ -58,13 +58,12 @@ func (e *Encoder) Stats() model.EncodeStats {
 	return e.stats
 }
 
-func (e *Encoder) Encode(dataReader io.Reader, output io.Writer) error {
+func (e *Encoder) Encode(dataReader io.Reader) error {
 	e.encodeDataToRawImage(dataReader)
-
-	return e.encodeRawImage(output)
+	return nil
 }
 
-func (e *Encoder) EncodeFiles(files []model.InputFile, output io.Writer) error {
+func (e *Encoder) EncodeFiles(files []model.InputFile) error {
 	e.stats = model.EncodeStats{}
 
 	dataToEncode, err := e.setupDataReader(files)
@@ -73,6 +72,10 @@ func (e *Encoder) EncodeFiles(files []model.InputFile, output io.Writer) error {
 	}
 
 	e.encodeDataToRawImage(dataToEncode)
+	return nil
+}
+
+func (e *Encoder) WriteEncodedPNG(output io.Writer) error {
 	return e.encodeRawImage(output)
 }
 
@@ -160,25 +163,50 @@ func (e *Encoder) encodeDataToRawImage(dataReader io.Reader) {
 		bytesRead, eofErr = io.ReadFull(dataReader, chunkBytes)
 		chunkBytes = chunkBytes[:bytesRead]
 
-		//wg.Add(1)
-		//go func(currentSubPixel int, bytesToWrite []byte) {
-		//	defer wg.Done()
 		br := bits.NewBitReader(chunkBytes)
-		for br.BytesLeftToRead() > 0 && e.currentSubPixel < len(e.image.Pix) {
+		LSBsToUse := int(e.config.LSBsToUse)
+
+		// Previous encode left a partially empty pixel, we will finish filling it and then continue encoding as usual
+		if e.currentSubPixelBit > 0 {
+			// example
+			// LSBs 3 - currentSubPixelBit 1 - bitsToFillPixel 01 (binary)
+			// subpixel 10101100
+			// result should be 10101010 (bits 2-3 modified)
+			numOfBitsLeftInPixel := uint(LSBsToUse - e.currentSubPixelBit)
+			bitsToFillPixel := br.ReadBits(numOfBitsLeftInPixel)
+			// Clear bits that we want to fill
+			e.image.Pix[e.currentSubPixel] -= ((e.image.Pix[e.currentSubPixel] << (8 - LSBsToUse)) >> (8 - LSBsToUse + e.currentSubPixelBit)) << e.currentSubPixelBit
+			// Set bits at designated location
+			e.image.Pix[e.currentSubPixel] += bitsToFillPixel << e.currentSubPixelBit
+			e.currentSubPixelBit = 0
+			e.currentSubPixel++
+		}
+		//TODO: error if encoding exceeds image bounds
+		for e.currentSubPixel < len(e.image.Pix) {
 			subPixelInCurrentPixel := e.currentSubPixel % 4
 			if subPixelInCurrentPixel == 0 && e.image.Pix[e.currentSubPixel+3] != 255 {
 				e.currentSubPixel += 4 // Skip to next pixel, since data encoded in non-opaque pixels cannot be recovered reliably
-			} else {
+			} else if br.BitsLeftToRead() >= LSBsToUse || subPixelInCurrentPixel == 3 {
 				if subPixelInCurrentPixel != 3 {
 					e.fillSubPixelLSBs(br, e.config.LSBsToUse)
 				}
 				e.currentSubPixel++
+			} else {
+				break // if on opaque pixel, and there is not enough data to fill the pixel, exit loop
 			}
 		}
-		//}(e.currentSubPixel, chunkBytes)
+		// We have some leftover bits that won't fill a pixel, so we write them in a way that only affects the necessary
+		// number of bits, while leaving the rest intact (in case those bits are modified at some other point in time)
+		if e.currentSubPixel < len(e.image.Pix) && br.BitsLeftToRead() > 0 {
+			// example
+			// LSBs 3 - remainingBits 11 (binary)
+			// subpixel 10101010
+			// result should be 10101011 (bits 1-2 modified)
 
-		e.currentByte += chunkSize
-		//e.currentSubPixel += (chunkSize / int(channelsToWrite) * 8) / int(e.lsbsToUse)
+			numOfBitsLeftToRead := uint(br.BitsLeftToRead())
+			e.image.Pix[e.currentSubPixel] = ((e.image.Pix[e.currentSubPixel] >> numOfBitsLeftToRead) << numOfBitsLeftToRead) + br.ReadBits(numOfBitsLeftToRead)
+			e.currentSubPixelBit = int(numOfBitsLeftToRead)
+		}
 	}
 	wg.Wait()
 }

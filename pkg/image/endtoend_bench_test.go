@@ -3,7 +3,6 @@ package image
 import (
 	"fmt"
 	"image/png"
-	"io"
 	"nsteg/pkg/config"
 	"testing"
 )
@@ -23,7 +22,7 @@ func BenchmarkFullEncodeSpeed(b *testing.B) {
 			b.Run(fmt.Sprintf("MBs=%f/LSBsToUse=%d", float64(numOfBytesToEncode)/1000000.0, LSBsToUse), func(b *testing.B) {
 				b.SetBytes(int64(numOfBytesToEncode))
 				for i := 0; i < b.N; i++ {
-					_ = encoder.EncodeFiles(filesToHide, io.Discard)
+					_ = encoder.EncodeFiles(filesToHide)
 				}
 			})
 		}
@@ -44,7 +43,7 @@ func BenchmarkFullDecodeSpeed(b *testing.B) {
 				b.Fatalf("Error creating image encoder")
 			}
 
-			err = encoder.EncodeFiles(filesToHide, io.Discard)
+			err = encoder.EncodeFiles(filesToHide)
 			if err != nil {
 				b.Fatalf("Error encoding file for decode benchmark: %s", err)
 			}

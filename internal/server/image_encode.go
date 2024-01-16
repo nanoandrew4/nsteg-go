@@ -74,7 +74,12 @@ func EncodeImageHandler(ctx *gin.Context) {
 	}
 
 	encodedImageBuffer := bytes.NewBuffer(make([]byte, 0, len(requestBody.ImageToEncode))) // pre allocate with size of original, since it should be similar
-	err = imageEncoder.EncodeFiles(filesToHide, encodedImageBuffer)
+	err = imageEncoder.EncodeFiles(filesToHide)
+	if err != nil {
+		handleEncodeError(ctx, logger, err)
+		return
+	}
+	err = imageEncoder.WriteEncodedPNG(encodedImageBuffer)
 	if err != nil {
 		handleEncodeError(ctx, logger, err)
 		return
@@ -132,7 +137,12 @@ func handleImageEncodeRequest(w http.ResponseWriter, r *http.Request) {
 	encodeImageRequest = nil
 
 	encodedImageBuffer := bytes.NewBuffer(make([]byte, 0, imageToEncodeSize)) // pre allocate with size of original, since it should be similar
-	err = imageEncoder.EncodeFiles(filesToHide, encodedImageBuffer)
+	err = imageEncoder.EncodeFiles(filesToHide)
+	if err != nil {
+		http.Error(w, "error encoding image", http.StatusInternalServerError)
+		return
+	}
+	err = imageEncoder.WriteEncodedPNG(encodedImageBuffer)
 	if err != nil {
 		http.Error(w, "error encoding image", http.StatusInternalServerError)
 		return

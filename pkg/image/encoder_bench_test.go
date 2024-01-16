@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func BenchmarkEncodeSpeedOnOpaqueImage(b *testing.B) {
+func BenchmarkEncodeWithPNGOutputOnOpaqueImage(b *testing.B) {
 	compressionLevelNames := map[png.CompressionLevel]string{
 		png.NoCompression:      "none",
 		png.DefaultCompression: "default",
@@ -43,10 +43,42 @@ func BenchmarkEncodeSpeedOnOpaqueImage(b *testing.B) {
 						}
 						bytesReader := bytes.NewReader(bytesToEncode)
 						b.StartTimer()
-						_ = testImageEncoder.Encode(bytesReader, io.Discard)
+						_ = testImageEncoder.Encode(bytesReader)
+						_ = testImageEncoder.WriteEncodedPNG(io.Discard)
 					}
 				})
 			}
+		}
+	}
+}
+
+func BenchmarkEncodeFilesOnOpaqueImage(b *testing.B) {
+	img, _ := generateImage(10000, 10000, false)
+	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
+		for _, byteSize := range []int{100000, 1000000, 10000000} {
+			numOfBytesToEncode := byteSize
+			b.Run(fmt.Sprintf("LSBsToUse=%d,MBs=%f",
+				LSBsToUse, float64(byteSize)/1000000.0), func(b *testing.B) {
+				b.SetBytes(int64(numOfBytesToEncode))
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					bytesToEncode := make([]byte, numOfBytesToEncode)
+					_, err := rand.Read(bytesToEncode)
+					if err != nil {
+						panic(err)
+					}
+					iConfig := config.ImageEncodeConfig{
+						LSBsToUse: LSBsToUse,
+					}
+					testImageEncoder, err := NewImageEncoder(img, iConfig)
+					if err != nil {
+						b.Fatalf("Error creating image encoder for benchmark")
+					}
+					bytesReader := bytes.NewReader(bytesToEncode)
+					b.StartTimer()
+					_ = testImageEncoder.Encode(bytesReader)
+				}
+			})
 		}
 	}
 }

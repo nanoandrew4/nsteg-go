@@ -2,16 +2,37 @@ package image
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"math/rand"
 	"nsteg/pkg/model"
 	"strconv"
+	"testing"
 )
 
 type testInputFile struct {
 	Name    string
 	Content []byte
+}
+
+type testFunc func(t *testing.T, LSBsToUse byte, randomizePixelOpaqueness bool)
+
+func runImageTestsWithAllLSBsAndOpaquenessSettings(t *testing.T, testFunc testFunc) {
+	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
+		LSBsToUseCopy := LSBsToUse
+		t.Run(fmt.Sprintf("LSBsToUse-%d", LSBsToUse), func(t *testing.T) {
+			t.Parallel()
+			t.Run("opaque", func(t *testing.T) {
+				t.Parallel()
+				testFunc(t, LSBsToUseCopy, true)
+			})
+			t.Run("non-opaque", func(t *testing.T) {
+				t.Parallel()
+				testFunc(t, LSBsToUseCopy, false)
+			})
+		})
+	}
 }
 
 func convertTestInputToStandardInput(testInputFiles []testInputFile) []model.InputFile {
@@ -43,6 +64,10 @@ func generateImage(width, height int, randomizePixelOpaqueness bool) (img *image
 
 func randUint8() uint8 {
 	return uint8(rand.Intn(256))
+}
+
+func calculateMaxPixelsInRGBAImage(opaquePixels int, LSBsToUse byte) int {
+	return ((opaquePixels - 1) * int(LSBsToUse) * 3) / 8
 }
 
 func generateFilesToEncode(availableBytes int) []testInputFile {

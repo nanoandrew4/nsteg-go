@@ -4,7 +4,6 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"image/png"
-	"io"
 	"nsteg/pkg/config"
 	"nsteg/pkg/model"
 	"testing"
@@ -13,51 +12,42 @@ import (
 const TestFilePrefix = "testfile_"
 const ImageSize = 3000
 
-func TestEncodeDecodeOnOpaqueImage(t *testing.T) {
-	testEncodeDecode(t, false)
+func TestEncodeDecode(t *testing.T) {
+	runImageTestsWithAllLSBsAndOpaquenessSettings(t, encodeDecode)
 }
 
-func TestEncodeDecodeOnPartiallyOpaqueImage(t *testing.T) {
-	testEncodeDecode(t, true)
-}
+func encodeDecode(t *testing.T, LSBsToUse byte, randomizePixelOpaqueness bool) {
+	imageToEncode, opaquePixels := generateImage(ImageSize, ImageSize, randomizePixelOpaqueness)
 
-func testEncodeDecode(t *testing.T, randomizePixelOpaqueness bool) {
-	for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
-		imageToEncode, opaquePixels := generateImage(ImageSize, ImageSize, randomizePixelOpaqueness)
+	testFiles := generateFilesToEncode((opaquePixels * int(LSBsToUse) * 3) / 8)
+	originalHashes := calculateInputFileHashes(testFiles)
+	encoder, err := NewImageEncoder(imageToEncode, config.ImageEncodeConfig{
+		LSBsToUse:           LSBsToUse,
+		PngCompressionLevel: png.NoCompression,
+	})
+	if err != nil {
+		t.Errorf("Error creating image encoder")
+	}
 
-		testFiles := generateFilesToEncode((opaquePixels * int(LSBsToUse) * 3) / 8)
-		originalHashes := calculateInputFileHashes(testFiles)
-		encoder, err := NewImageEncoder(imageToEncode, config.ImageEncodeConfig{
-			LSBsToUse:           LSBsToUse,
-			PngCompressionLevel: png.NoCompression,
-		})
-		if err != nil {
-			t.Errorf("Error creating image encoder")
-			continue
-		}
+	err = encoder.EncodeFiles(convertTestInputToStandardInput(testFiles))
+	if err != nil {
+		t.Fatalf("Error encoding image: %s", err)
+	}
 
-		err = encoder.EncodeFiles(convertTestInputToStandardInput(testFiles), io.Discard)
-		if err != nil {
-			t.Fatalf("Error encoding image: %s", err)
-		}
+	decoder, err := NewImageDecoder(encoder.image)
+	if err != nil {
+		t.Errorf("Error creating image decoder")
+	}
 
-		decoder, err := NewImageDecoder(encoder.image)
-		if err != nil {
-			t.Errorf("Error creating image decoder")
-			continue
-		}
+	decodedFiles, err := decoder.DecodeFiles()
+	if err != nil {
+		t.Errorf("Error decoding image with %d LSBs: %s", LSBsToUse, err)
+	}
+	decodedHashes := calculateOutputFileHashes(decodedFiles)
 
-		decodedFiles, err := decoder.DecodeFiles()
-		if err != nil {
-			t.Errorf("Error decoding image with %d LSBs: %s", LSBsToUse, err)
-			continue
-		}
-		decodedHashes := calculateOutputFileHashes(decodedFiles)
-
-		for i := 0; i < len(testFiles); i++ {
-			if originalHashes[i] != decodedHashes[i] {
-				t.Errorf("Hash for file %d is not the same after decoding | using %d LSBs", i, LSBsToUse)
-			}
+	for i := 0; i < len(testFiles); i++ {
+		if originalHashes[i] != decodedHashes[i] {
+			t.Errorf("Hash for file %d is not the same after decoding | using %d LSBs", i, LSBsToUse)
 		}
 	}
 }
