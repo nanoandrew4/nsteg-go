@@ -23,7 +23,7 @@ func TestMultiPassEncode(t *testing.T) {
 }
 
 func encodeFiles(t *testing.T, LSBsToUse byte, randomizePixelOpaqueness bool) {
-	img, opaquePixels := generateImage(ImageSize, ImageSize, randomizePixelOpaqueness)
+	img, opaquePixels := generateImage(testImageSize, testImageSize, randomizePixelOpaqueness)
 	testFiles := generateFilesToEncode(calculateBytesThatFitInImage(opaquePixels, LSBsToUse))
 
 	var expectedEncodedBytes []byte
@@ -55,7 +55,7 @@ func encodeFiles(t *testing.T, LSBsToUse byte, randomizePixelOpaqueness bool) {
 
 func testEncode(multiPass bool) testFunc {
 	return func(t *testing.T, LSBsToUse byte, randomizePixelOpaqueness bool) {
-		img, opaquePixels := generateImage(ImageSize, ImageSize, randomizePixelOpaqueness)
+		img, opaquePixels := generateImage(testImageSize, testImageSize, randomizePixelOpaqueness)
 		encoder, err := NewImageEncoder(img, config.ImageEncodeConfig{LSBsToUse: LSBsToUse})
 		if err != nil {
 			t.Fatalf("Error creating image encoder")

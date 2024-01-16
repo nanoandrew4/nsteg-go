@@ -76,7 +76,7 @@ func generateFilesToEncode(availableBytes int) (testFiles []testInputFile) {
 	var exit bool
 	var numOfBytesGenerated = 64 // 64 bits are needed to encode the number of files
 	for i := 0; !exit; i++ {
-		fileName := TestFilePrefix + strconv.Itoa(i)
+		fileName := testFilePrefix + strconv.Itoa(i)
 		bytesToUseForFile := rand.Intn(availableBytes - (8 + len(fileName) + 8))
 
 		// a file requires 8 bytes for the length of the name, plus however many bytes long the name is, plus eight bytes

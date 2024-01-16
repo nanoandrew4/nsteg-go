@@ -184,14 +184,14 @@ func (d *Decoder) advanceToNextOpaqueSubpixel() error {
 		d.advanceToNextOpaquePixelIfOnNonOpaquePixel()
 	}
 
-	if d.currentSubPixel >= len(d.image.Pix) {
+	if d.currentSubPixel > len(d.image.Pix) {
 		return ErrDecodeFileBounds
 	}
 	return nil
 }
 
 func (d *Decoder) advanceToNextOpaquePixelIfOnNonOpaquePixel() {
-	for d.image.Pix[(d.currentSubPixel/4)*4+3] != 255 {
+	for d.currentSubPixel < len(d.image.Pix) && d.image.Pix[(d.currentSubPixel/4)*4+3] != 255 {
 		d.currentSubPixel += 4
 	}
 }
