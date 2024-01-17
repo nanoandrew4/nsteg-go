@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"io"
 	"nsteg/pkg/config"
+	"nsteg/test"
 	"testing"
 )
 
@@ -26,42 +27,42 @@ func BenchmarkEncodeWithPNGOutput(b *testing.B) {
 	}
 
 	for _, randomizePixelOpaqueness := range []bool{false, true} {
-		img, opaquePixels := generateImage(benchImageSize, benchImageSize, randomizePixelOpaqueness)
-		for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
-			numOfBytesToEncode := calculateBytesThatFitInImage(opaquePixels, LSBsToUse)
-			for _, compressionLevel := range compressionLevelsToBenchmark {
-				bLabel := fmt.Sprintf("%s,LSBsToUse=%d,png.CompressionLevel=%s",
-					getOpaquenessLabel(randomizePixelOpaqueness), LSBsToUse, compressionLevelNames[compressionLevel])
+		b.Run(getOpaquenessLabel(randomizePixelOpaqueness), func(b *testing.B) {
+			img, opaquePixels := generateImage(benchImageSize, benchImageSize, randomizePixelOpaqueness)
+			for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
+				numOfBytesToEncode := calculateBytesThatFitInImage(opaquePixels, LSBsToUse)
+				for _, compressionLevel := range compressionLevelsToBenchmark {
+					benchmarkLabel := fmt.Sprintf("LSBsToUse=%d,png.CompressionLevel=%s", LSBsToUse,
+						compressionLevelNames[compressionLevel])
 
-				b.Run(bLabel, func(b *testing.B) {
-					var numOfEncodedBytes int
-					for i := 0; i < b.N; i++ {
-						b.StopTimer()
-						bytesToEncode := generateRandomBytes(numOfBytesToEncode)
-						iConfig := config.ImageEncodeConfig{
-							LSBsToUse:           LSBsToUse,
-							PngCompressionLevel: compressionLevel,
+					b.Run(benchmarkLabel, func(b *testing.B) {
+						b.SetBytes(int64(numOfBytesToEncode))
+						for i := 0; i < b.N; i++ {
+							b.StopTimer()
+							bytesToEncode := test.GenerateRandomBytes(numOfBytesToEncode)
+							iConfig := config.ImageEncodeConfig{
+								LSBsToUse:           LSBsToUse,
+								PngCompressionLevel: compressionLevel,
+							}
+							testImageEncoder, err := NewImageEncoder(img, iConfig)
+							if err != nil {
+								b.Fatalf("Error creating image encoder for benchmark")
+							}
+							bytesReader := bytes.NewReader(bytesToEncode)
+							b.StartTimer()
+							err = testImageEncoder.Encode(bytesReader)
+							if err != nil {
+								b.Fatalf("Error during image encoding: %s", err)
+							}
+							err = testImageEncoder.WriteEncodedPNG(io.Discard)
+							if err != nil {
+								b.Fatalf("Error writing PNG image: %s", err)
+							}
 						}
-						testImageEncoder, err := NewImageEncoder(img, iConfig)
-						if err != nil {
-							b.Fatalf("Error creating image encoder for benchmark")
-						}
-						bytesReader := bytes.NewReader(bytesToEncode)
-						numOfEncodedBytes += numOfBytesToEncode
-						b.StartTimer()
-						err = testImageEncoder.Encode(bytesReader)
-						if err != nil {
-							b.Fatalf("Error during image encoding: %s", err)
-						}
-						err = testImageEncoder.WriteEncodedPNG(io.Discard)
-						if err != nil {
-							b.Fatalf("Error writing PNG image: %s", err)
-						}
-					}
-					b.SetBytes(int64(numOfEncodedBytes))
-				})
+					})
+				}
 			}
-		}
+		})
 	}
 }
 
@@ -72,10 +73,10 @@ func BenchmarkEncode(b *testing.B) {
 			for LSBsToUse := byte(1); LSBsToUse <= 8; LSBsToUse++ {
 				numOfBytesToEncode := calculateBytesThatFitInImage(opaquePixels, LSBsToUse)
 				b.Run(fmt.Sprintf("LSBsToUse=%d", LSBsToUse), func(b *testing.B) {
-					var numOfEncodedBytes int
+					b.SetBytes(int64(numOfBytesToEncode))
 					for i := 0; i < b.N; i++ {
 						b.StopTimer()
-						bytesToEncode := generateRandomBytes(numOfBytesToEncode)
+						bytesToEncode := test.GenerateRandomBytes(numOfBytesToEncode)
 						iConfig := config.ImageEncodeConfig{
 							LSBsToUse: LSBsToUse,
 						}
@@ -84,14 +85,12 @@ func BenchmarkEncode(b *testing.B) {
 							b.Fatalf("Error creating image encoder for benchmark")
 						}
 						bytesReader := bytes.NewReader(bytesToEncode)
-						numOfEncodedBytes += numOfBytesToEncode
 						b.StartTimer()
 						err = testImageEncoder.Encode(bytesReader)
 						if err != nil {
 							b.Fatalf("Error during image encoding: %s", err)
 						}
 					}
-					b.SetBytes(int64(numOfEncodedBytes))
 				})
 			}
 		})
@@ -106,7 +105,7 @@ func BenchmarkEncodeFiles(b *testing.B) {
 				numOfBytesToGenerate := calculateBytesThatFitInImage(opaquePixels, LSBsToUse)
 				testFiles := generateFilesToEncode(numOfBytesToGenerate)
 				b.Run(fmt.Sprintf("LSBsToUse=%d", LSBsToUse), func(b *testing.B) {
-					var numOfEncodedBytes int
+					b.SetBytes(int64(numOfBytesToGenerate))
 					for i := 0; i < b.N; i++ {
 						b.StopTimer()
 						iConfig := config.ImageEncodeConfig{
@@ -116,7 +115,6 @@ func BenchmarkEncodeFiles(b *testing.B) {
 						if err != nil {
 							b.Fatalf("Error creating image encoder for benchmark")
 						}
-						numOfEncodedBytes += numOfBytesToGenerate
 						filesToEncode := convertTestInputToStandardInput(testFiles)
 						b.StartTimer()
 						err = testImageEncoder.EncodeFiles(filesToEncode)
@@ -124,7 +122,6 @@ func BenchmarkEncodeFiles(b *testing.B) {
 							b.Fatalf("Error during image encoding: %s", err)
 						}
 					}
-					b.SetBytes(int64(numOfEncodedBytes))
 				})
 			}
 		})

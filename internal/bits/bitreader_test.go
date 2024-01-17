@@ -1,44 +1,8 @@
 package bits
 
 import (
-	"crypto/rand"
-	"fmt"
 	"testing"
 )
-
-const numOfBytesForBenchmark = 1000000
-
-func BenchmarkReadBits(b *testing.B) {
-	var bBitReader *BitReader
-	for LSBsToUse := uint(1); LSBsToUse <= 8; LSBsToUse++ {
-		b.Run(fmt.Sprintf("LSBsToUse=%d", LSBsToUse), func(b *testing.B) {
-			var bytesRead int
-			for i := 0; i < b.N; {
-				b.StopTimer()
-				bBitReader = initBenchmarkBitReader()
-				b.StartTimer()
-				for ; i < b.N && len(bBitReader.bytes) > 0; i++ {
-					bBitReader.ReadBits(LSBsToUse)
-				}
-				b.StopTimer()
-				if len(bBitReader.bytes) == 0 {
-					bytesRead += numOfBytesForBenchmark
-				}
-			}
-			bytesRead += numOfBytesForBenchmark - len(bBitReader.bytes)
-			b.SetBytes(int64(bytesRead))
-		})
-	}
-}
-
-func initBenchmarkBitReader() *BitReader {
-	bytesForBenchmark := make([]byte, numOfBytesForBenchmark)
-	_, err := rand.Read(bytesForBenchmark)
-	if err != nil {
-		panic(err)
-	}
-	return NewBitReader(bytesForBenchmark)
-}
 
 func TestReadBits(t *testing.T) {
 

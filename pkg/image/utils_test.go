@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"math/rand"
 	"nsteg/pkg/model"
+	"nsteg/test"
 	"strconv"
 	"testing"
 )
@@ -90,22 +91,13 @@ func generateFilesToEncode(availableBytes int) (testFiles []testInputFile) {
 
 		filesToEncode = append(filesToEncode, testInputFile{
 			Name:    fileName,
-			Content: generateRandomBytes(bytesToUseForFile),
+			Content: test.GenerateRandomBytes(bytesToUseForFile),
 		})
 
 		numOfBytesGenerated += bytesRequiredForNextFile
 	}
 
 	return filesToEncode
-}
-
-func generateRandomBytes(numOfBytesToGenerate int) []byte {
-	generatedBytes := make([]byte, numOfBytesToGenerate)
-	_, err := rand.Read(generatedBytes)
-	if err != nil {
-		panic(err)
-	}
-	return generatedBytes
 }
 
 func getOpaquenessLabel(randomizeOpaqueness bool) string {

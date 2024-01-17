@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"nsteg/pkg/config"
 	"nsteg/pkg/model"
+	"nsteg/test"
 	"testing"
 )
 
@@ -43,7 +44,7 @@ func multiEncodeDecode(enableMultiPassEncoding bool) testFunc {
 			encodesToPerform = rand.Intn(99) + 1
 		}
 		for i := 0; i < encodesToPerform; i++ {
-			bytesToEncode := generateRandomBytes(calculateBytesThatFitInImage(opaquePixels, LSBsToUse) / encodesToPerform)
+			bytesToEncode := test.GenerateRandomBytes(calculateBytesThatFitInImage(opaquePixels, LSBsToUse) / encodesToPerform)
 			err = encoder.Encode(bytes.NewReader(bytesToEncode))
 			if err != nil {
 				t.Fatalf("Error encoding files %s", err)

@@ -44,6 +44,10 @@ func (d *Decoder) Stats() model.DecodeStats {
 }
 
 func (d *Decoder) Decode(numOfBytesToDecode int) ([]byte, error) {
+	decodeStart := time.Now()
+	defer func() {
+		d.stats.DataDecoding += time.Since(decodeStart)
+	}()
 	return d.readBytes(uint(numOfBytesToDecode))
 }
 
