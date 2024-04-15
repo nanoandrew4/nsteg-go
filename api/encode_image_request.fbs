@@ -1,0 +1,14 @@
+namespace nsteg.EncodeImage;
+
+table ImageEncodeRequest {
+    lsbs_to_use: ubyte;
+    image_to_encode: [ubyte];
+    files_to_hide: [FileToHide];
+}
+
+table FileToHide {
+    name: string;
+    content: [ubyte];
+}
+
+root_type ImageEncodeRequest;
