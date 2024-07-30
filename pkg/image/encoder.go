@@ -10,6 +10,8 @@ import (
 	"nsteg/internal/bits"
 	"nsteg/pkg/config"
 	"nsteg/pkg/model"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -130,14 +132,16 @@ func (e *Encoder) setupDataReader(filesToHide []model.InputFile) (io.Reader, err
 	// aside from the length of the encoded data
 	requiredBitsForEncoding := int64(3 + 64)
 	for _, fileToHide := range filesToHide {
+		splitPathToFile := strings.Split(fileToHide.Name, string(os.PathSeparator))
+		fileName := splitPathToFile[max(len(splitPathToFile)-1, 0)]
 		dataReaders = append(dataReaders,
-			bytes.NewReader(intToBitArray(len(fileToHide.Name))),
-			bytes.NewReader([]byte(fileToHide.Name)),
+			bytes.NewReader(intToBitArray(len(fileName))),
+			bytes.NewReader([]byte(fileName)),
 			bytes.NewReader(intToBitArray(int(fileToHide.Size))),
 			fileToHide.Content)
 
 		// length of file name (8 bytes) + file name + length of file (8 bytes) + file contents
-		requiredBitsForEncoding += (8 + int64(len([]byte(fileToHide.Name))) + 8 + fileToHide.Size) * 8
+		requiredBitsForEncoding += (8 + int64(len(fileName)) + 8 + fileToHide.Size) * 8
 	}
 
 	availableBitsInImage := <-availablePixelChan * uint64(channelsToWrite) * uint64(e.config.LSBsToUse)
@@ -154,7 +158,7 @@ func (e *Encoder) encodeDataToRawImage(dataReader io.Reader) {
 		e.stats.DataEncoding = time.Since(encodeStart)
 	}()
 
-	chunkSize := e.minChunkSize * e.chunkSizeMultiplier
+	chunkSize := max(e.minChunkSize, e.minChunkSize*e.chunkSizeMultiplier)
 
 	bytesRead := chunkSize
 	var eofErr error
