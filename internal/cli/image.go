@@ -39,6 +39,7 @@ type commonOpts struct {
 	lsbsToUse           int8
 	chunkSizeMultiplier int
 	pngCompression      string
+	slowPngEncode       bool
 }
 
 func (o commonOpts) toEncodeConfig() config.ImageEncodeConfig {
@@ -50,6 +51,7 @@ func (o commonOpts) toEncodeConfig() config.ImageEncodeConfig {
 		LSBsToUse:           byte(o.lsbsToUse),
 		ChunkSizeMultiplier: o.chunkSizeMultiplier,
 		PngCompressionLevel: mappedCompression,
+		SlowPngEncode:       o.slowPngEncode,
 	}
 }
 
@@ -79,6 +81,7 @@ func encodeImageCommand() *cobra.Command {
 	encImgCmd.Flags().Int8Var(&opts.config.lsbsToUse, "lsbs", 3, "Least significant bits to use from each pixel. Can be 1-8. The more LSBs are used, the more distortion will be noticeable in the final image")
 	encImgCmd.Flags().IntVar(&opts.config.chunkSizeMultiplier, "chunk-size-multiplier", config.DefaultChunkSizeMultiplier, "Chunk size to be handled by a single goroutine")
 	encImgCmd.Flags().StringVar(&opts.config.pngCompression, "png-compression", "default", "Compression for output png. Options are default, none, fast, best")
+	encImgCmd.Flags().BoolVar(&opts.config.slowPngEncode, "use-slow-png", false, "Provided in case the preferred faster png encoder causes issues, to fallback on the slower standard one")
 
 	MarkFlagsRequired(encImgCmd, "image", "output-file", "files")
 

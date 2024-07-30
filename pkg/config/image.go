@@ -9,6 +9,7 @@ const (
 type ImageEncodeConfig struct {
 	LSBsToUse           byte
 	ChunkSizeMultiplier int
+	SlowPngEncode       bool
 	PngCompressionLevel png.CompressionLevel
 }
 

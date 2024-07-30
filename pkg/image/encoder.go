@@ -3,6 +3,7 @@ package image
 import (
 	"bytes"
 	"errors"
+	fastpng "github.com/amarburg/go-fast-png"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -226,7 +227,12 @@ func (e *Encoder) encodeRawImage(outputWriter io.Writer) error {
 	defer func() {
 		e.stats.OutputImageEncoding = time.Since(imageEncodeStart)
 	}()
-	enc := png.Encoder{CompressionLevel: e.config.PngCompressionLevel}
+
+	if e.config.SlowPngEncode {
+		enc := png.Encoder{CompressionLevel: e.config.PngCompressionLevel}
+		return enc.Encode(outputWriter, e.image)
+	}
+	enc := fastpng.Encoder{CompressionLevel: fastpng.CompressionLevel(e.config.PngCompressionLevel)}
 	return enc.Encode(outputWriter, e.image)
 }
 
